@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scrabble Word Builder</title>
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Scrabble Word Builder</h1>
+        <form method="post">
+            <label for="letters">Letters:</label>
+            <input type="text" id="letters" name="letters" required><br><br>
+            <label for="board_letters">Board Letters:</label>
+            <input type="text" id="board_letters" name="board_letters"><br><br>
+            <input type="submit" value="Generate Words" class="btn">
+            <button type="button" onclick="clearBoard()" class="btn-clear">Clear Board</button>
+        </form>
+    </div>
+    
+    <script>
+        function clearBoard() {
+            document.getElementById("letters").value = "";
+            document.getElementById("board_letters").value = "";
+        }
+    </script>
+</body>
+</html>

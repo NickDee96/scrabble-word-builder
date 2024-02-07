@@ -1,6 +1,7 @@
+from flask import Flask, render_template, request
 import itertools
-import argparse
-from typing import List, Tuple
+
+app = Flask(__name__)
 
 # load a text file containing a list of english words
 with open('Collins Scrabble Words (2019).txt', 'r') as f:
@@ -13,29 +14,15 @@ scores = {
     'U': 1, 'V': 4, 'W': 4, 'X': 8, 'Y': 4, 'Z': 10
 }
 
-def word_score(word: str, zero_indices: List[int] = []) -> int:
+def word_score(word, zero_indices=[]):
     """
     Calculate the score of a word based on Scrabble letter scores.
-
-    Args:
-        word (str): The word to calculate the score for.
-        zero_indices (List[int]): Indices in the word that should be scored as zero.
-
-    Returns:
-        int: The score of the word.
     """
     return sum(scores.get(letter.upper(), 0) if i not in zero_indices else 0 for i, letter in enumerate(word))
 
-def scrabble_word_builder(letters: List[str], board_letters: List[str]) -> List[Tuple[str, int]]:
+def scrabble_word_builder(letters, board_letters):
     """
     Generate all possible words that can be formed from the given letters and board letters.
-
-    Args:
-        letters (List[str]): The letters to use to form words.
-        board_letters (List[str]): The letters on the board to use to form words.
-
-    Returns:
-        List[Tuple[str, int]]: A list of possible words and their scores.
     """
     letters = [x.upper() for x in letters]
     board_letters = ''.join([x.upper() for x in board_letters])
@@ -64,33 +51,23 @@ def scrabble_word_builder(letters: List[str], board_letters: List[str]) -> List[
     possible_words.sort(key=lambda x: x[1], reverse=False)
     return possible_words
 
-def main():
-    parser = argparse.ArgumentParser(description='Scrabble Word Builder')
-    parser.add_argument('--letters', type=str, required=True, help='Letters to use to form words')
-    parser.add_argument('--board_letters', type=str, default="", help='Letters on the board to use to form words')
-    args = parser.parse_args()
+@app.route('/', methods=['GET', 'POST'])
+def scrabble_word_builder_web():
+    if request.method == 'POST':
+        letters = request.form['letters']
+        board_letters = request.form['board_letters']
+        words_scores = scrabble_word_builder(letters, board_letters)
+        words_by_length = {}
+        for word, score in words_scores:
+            if len(word) not in words_by_length:
+                words_by_length[len(word)] = [(word, score)]
+            else:
+                words_by_length[len(word)].append((word, score))
+        for length in words_by_length:
+            words_by_length[length].sort(key=lambda x: x[0])  # Sort alphabetically
+            words_by_length[length].sort(key=lambda x: x[1], reverse=True)  # Sort by score
+        return render_template('result.html', words_by_length=words_by_length)
+    return render_template('index.html')
 
-    words_scores = scrabble_word_builder([x for x in args.letters], [x for x in args.board_letters])
-    
-    # Group words by length
-    words_by_length = {}
-    for word, score in words_scores:
-        if len(word) not in words_by_length:
-            words_by_length[len(word)] = [(word, score)]
-        else:
-            words_by_length[len(word)].append((word, score))
-    
-    # Sort each group by score and then alphabetically
-    for length in words_by_length:
-        words_by_length[length].sort(key=lambda x: x[0])  # Sort alphabetically
-        words_by_length[length].sort(key=lambda x: x[1], reverse=True)  # Sort by score
-    
-    # Print out the words
-    for length in sorted(words_by_length.keys()):
-        print(f"{length}-Letter Words:")
-        for word, score in words_by_length[length]:
-            print(f"Word: {word}, Score: {score}")
-        print()
-
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    app.run(debug=True)

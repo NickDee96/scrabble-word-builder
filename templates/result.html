@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scrabble Word Builder Result</title>
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Scrabble Word Builder Result</h1>
+        {% for length, words in words_by_length.items() %}
+            <h2>{{ length }}-Letter Words:</h2>
+            <ul>
+                {% for word, score in words %}
+                    <li>Word: {{ word }}, Score: {{ score }}</li>
+                {% endfor %}
+            </ul>
+        {% endfor %}
+    </div>
+</body>
+</html>
