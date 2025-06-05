@@ -1,0 +1,17 @@
+{
+  "name": "scrabble-word-builder",
+  "version": "1.0.0",
+  "description": "A Scrabble Word Builder with Flask backend and Next.js frontend",
+  "scripts": {
+    "dev": "concurrently \"python app.py\" \"cd frontend && npm run dev\"",
+    "start:backend": "python app.py",
+    "start:frontend": "cd frontend && npm run dev",
+    "install:frontend": "cd frontend && npm install",
+    "build:frontend": "cd frontend && npm run build"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "author": "Nick Mumero",
+  "license": "MIT"
+}

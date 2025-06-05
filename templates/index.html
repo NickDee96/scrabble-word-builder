@@ -4,26 +4,80 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Scrabble Word Builder</title>
-    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='styles.css') }}">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        input[type="submit"] {
+            background-color: #4CAF50;
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+        }
+        input[type="submit"]:hover {
+            background-color: #45a049;
+        }
+        .help-text {
+            font-size: 14px;
+            color: #666;
+            margin-top: 5px;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
-        <h1>Scrabble Word Builder</h1>
+        <h1>🎯 Scrabble Word Builder</h1>
         <form method="post">
-            <label for="letters">Letters:</label>
-            <input type="text" id="letters" name="letters" required><br><br>
-            <label for="board_letters">Board Letters:</label>
-            <input type="text" id="board_letters" name="board_letters"><br><br>
-            <input type="submit" value="Generate Words" class="btn">
-            <button type="button" onclick="clearBoard()" class="btn-clear">Clear Board</button>
+            <div class="form-group">
+                <label for="letters">Your Letters:</label>
+                <input type="text" id="letters" name="letters" required>
+                <div class="help-text">Enter the letters you have (e.g., "abcdefg")</div>
+            </div>
+            
+            <div class="form-group">
+                <label for="board_letters">Board Letters (optional):</label>
+                <input type="text" id="board_letters" name="board_letters">
+                <div class="help-text">Letters already on the board that you can use</div>
+            </div>
+            
+            <input type="submit" value="Find Words">
         </form>
     </div>
-    
-    <script>
-        function clearBoard() {
-            document.getElementById("letters").value = "";
-            document.getElementById("board_letters").value = "";
-        }
-    </script>
 </body>
 </html>
