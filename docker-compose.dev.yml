@@ -1,0 +1,21 @@
+services:
+  backend:
+    environment:
+      - FLASK_ENV=development
+      - FLASK_DEBUG=1
+    volumes:
+      # Mount source code for development
+      - "./app.py:/app/app.py"
+      - "./scrabble.py:/app/scrabble.py"
+    command: ["python", "-m", "flask", "run", "--host=0.0.0.0", "--port=5000", "--debug"]
+
+  frontend:
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_API_URL=http://localhost:5000
+    volumes:
+      # Mount source code for development
+      - "./frontend:/app"
+      - "/app/node_modules"
+      - "/app/.next"
+    command: ["npm", "run", "dev"]
