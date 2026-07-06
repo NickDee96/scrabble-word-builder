@@ -171,3 +171,34 @@ def test_analyze_simulation_mode_returns_win_pct():
     win = [p["winPct"] for p in plays]
     assert win == sorted(win, reverse=True)
 
+
+def test_selfplay_new_deals_game():
+    response = client.post("/api/selfplay/new", json={"seed": 1})
+    assert response.status_code == 200
+    state = response.json()
+    assert len(state["racks"]["A"]) == 7
+    assert len(state["racks"]["B"]) == 7
+    assert state["turn"] == "A"
+    assert state["over"] is False
+
+
+def test_selfplay_step_plays_a_turn():
+    new = client.post("/api/selfplay/new", json={"seed": 4}).json()
+    response = client.post(
+        "/api/selfplay/step",
+        json={"state": new, "agents": {"A": "equity", "B": "equity"}},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["move"]["player"] == "A"
+    assert body["state"]["turn"] in ("A", "B")
+    assert body["state"]["moveNumber"] == 1
+
+
+def test_selfplay_step_rejects_bad_turn():
+    new = client.post("/api/selfplay/new", json={"seed": 4}).json()
+    new["turn"] = "X"
+    response = client.post("/api/selfplay/step", json={"state": new})
+    assert response.status_code == 422
+
+

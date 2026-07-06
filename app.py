@@ -13,6 +13,7 @@ from typing import Optional
 from scrabble_engine import scrabble_word_builder, word_count
 from board_engine import generate_moves, BOARD_SIZE
 from simulation import simulate
+from selfplay import new_game, play_turn, RACK_SIZE
 
 # --- Configuration (environment-driven) ------------------------------------
 _DEFAULT_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000"
@@ -41,6 +42,11 @@ def _find_words_rate_limit() -> str:
 def _analyze_rate_limit() -> str:
     """Rate limit for the board-analysis endpoint (heavier than find-words)."""
     return os.getenv("RATE_LIMIT_ANALYZE", "20/minute")
+
+
+def _selfplay_rate_limit() -> str:
+    """Rate limit for a single self-play turn (auto-play issues one request per turn)."""
+    return os.getenv("RATE_LIMIT_SELFPLAY", "120/minute")
 
 
 app = FastAPI(
@@ -136,6 +142,22 @@ class AnalyzeResponse(BaseModel):
     plays: list[PlayOut]
     total: int
     message: str
+
+
+class SelfPlayAgents(BaseModel):
+    A: str = "equity"
+    B: str = "simulation"
+
+
+class NewGameRequest(BaseModel):
+    seed: Optional[int] = None
+
+
+class StepRequest(BaseModel):
+    state: dict
+    agents: SelfPlayAgents = SelfPlayAgents()
+    timeBudgetMs: int = 2000
+    maxCandidates: int = 8
 
 
 def _validate_rack(letters: str, board_letters: str) -> None:
@@ -297,6 +319,49 @@ async def api_analyze(request: Request, data: AnalyzeRequest):
         for m in unique[:limit]
     ]
     return AnalyzeResponse(plays=plays, total=len(moves), message=f"Found {len(moves)} plays")
+
+
+@app.post("/api/selfplay/new")
+@limiter.limit(_selfplay_rate_limit)
+async def api_selfplay_new(request: Request, data: NewGameRequest):
+    """Deal a fresh two-agent self-play game."""
+    return new_game(data.seed)
+
+
+@app.post("/api/selfplay/step")
+@limiter.limit(_selfplay_rate_limit)
+async def api_selfplay_step(request: Request, data: StepRequest):
+    """Play one turn of a self-play game for the side to move and return the new state."""
+    state = data.state
+    for key in ("board", "racks", "bag", "scores", "turn"):
+        if key not in state:
+            raise HTTPException(status_code=422, detail=f"Missing game-state field: {key}")
+
+    turn = state["turn"]
+    if turn not in ("A", "B"):
+        raise HTTPException(status_code=422, detail="turn must be 'A' or 'B'")
+    racks = state["racks"]
+    if not isinstance(racks, dict) or any(
+        not isinstance(racks.get(p, ""), str) or len(racks.get(p, "")) > RACK_SIZE
+        for p in ("A", "B")
+    ):
+        raise HTTPException(status_code=422, detail="Each rack must be a string of at most 7 tiles")
+    if not isinstance(state["board"], str) or len(state["board"]) > 15 * 16:
+        raise HTTPException(status_code=422, detail="Invalid board")
+
+    if state.get("over"):
+        return {"state": state, "move": {"type": "none", "player": turn, "agent": ""}}
+
+    agent = data.agents.A if turn == "A" else data.agents.B
+    if agent not in ("equity", "simulation"):
+        raise HTTPException(status_code=422, detail="agent must be 'equity' or 'simulation'")
+
+    time_budget = max(300, min(int(data.timeBudgetMs), MAX_SIM_TIME_MS))
+    max_cand = max(1, min(int(data.maxCandidates), MAX_SIM_CANDIDATES))
+    new_state, move = play_turn(
+        state, agent, time_budget_ms=time_budget, max_candidates=max_cand
+    )
+    return {"state": new_state, "move": move}
 
 
 @app.get("/api/health", response_model=HealthResponse)
