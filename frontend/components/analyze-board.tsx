@@ -54,6 +54,7 @@ export default function AnalyzeBoard({
   const [pasteOpen, setPasteOpen] = useState(false)
   const [pasteText, setPasteText] = useState("")
   const [copied, setCopied] = useState(false)
+  const [mode, setMode] = useState<"equity" | "score">("equity")
   const gridRef = useRef<HTMLDivElement>(null)
 
   const ghost = useMemo(() => {
@@ -90,14 +91,14 @@ export default function AnalyzeBoard({
     }
   }
 
-  const analyze = async () => {
+  const analyze = async (useMode: "equity" | "score" = mode) => {
     setIsAnalyzing(true)
     setError(null)
     try {
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ board, rack, maxResults: 20 }),
+        body: JSON.stringify({ board, rack, maxResults: 20, mode: useMode }),
       })
       if (!response.ok) {
         let detail = `Request failed (status ${response.status}).`
@@ -125,6 +126,11 @@ export default function AnalyzeBoard({
     } finally {
       setIsAnalyzing(false)
     }
+  }
+
+  const changeMode = (m: "equity" | "score") => {
+    setMode(m)
+    if (rack.trim() && plays.length > 0) analyze(m)
   }
 
   const commitPlay = (play: Play) => {
@@ -287,8 +293,28 @@ export default function AnalyzeBoard({
               />
               <p className="text-xs text-muted-foreground">Use ? for a blank tile.</p>
             </div>
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-muted-foreground">Rank by</span>
+              <div className="inline-flex rounded-md border overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => changeMode("equity")}
+                  className={`px-2.5 py-1 ${mode === "equity" ? "bg-blue-600 text-white" : "bg-white hover:bg-muted"}`}
+                >
+                  Equity
+                </button>
+                <button
+                  type="button"
+                  onClick={() => changeMode("score")}
+                  className={`px-2.5 py-1 ${mode === "score" ? "bg-blue-600 text-white" : "bg-white hover:bg-muted"}`}
+                >
+                  Score
+                </button>
+              </div>
+              <span className="text-muted-foreground hidden sm:inline">= score + tiles kept</span>
+            </div>
             <Button
-              onClick={analyze}
+              onClick={() => analyze()}
               disabled={!rack.trim() || isAnalyzing}
               className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
             >
@@ -320,7 +346,7 @@ export default function AnalyzeBoard({
                 <Trophy className="w-5 h-5 text-yellow-500" /> Best plays
               </CardTitle>
               <p className="text-xs text-muted-foreground">
-                Hover to preview on the board; click to place it.
+                Ranked by {mode === "equity" ? "equity (score + leave)" : "score"}. Hover to preview; click to place.
               </p>
             </CardHeader>
             <CardContent>
@@ -341,10 +367,15 @@ export default function AnalyzeBoard({
                       <span>
                         {cellLabel(play.row, play.col)} · {play.direction}
                       </span>
-                      <span className="hidden sm:inline">
+                      <span className="hidden md:inline">
                         {play.leave ? `keep ${play.leave}` : "uses all"}
                       </span>
-                      <Badge className="bg-blue-600 text-white">{play.score}</Badge>
+                      <span className="hidden sm:inline tabular-nums">
+                        {mode === "equity" ? `${play.score} pts` : `eq ${play.equity.toFixed(1)}`}
+                      </span>
+                      <Badge className="bg-blue-600 text-white tabular-nums">
+                        {mode === "equity" ? play.equity.toFixed(1) : play.score}
+                      </Badge>
                     </span>
                   </button>
                 ))}

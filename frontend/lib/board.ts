@@ -21,6 +21,8 @@ export interface Play {
   direction: "across" | "down"
   score: number
   leave: string
+  equity: number
+  leaveValue: number
   tiles: AnalyzePlacedTile[]
   crossWords: string[]
 }
