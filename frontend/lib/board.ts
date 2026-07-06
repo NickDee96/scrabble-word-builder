@@ -25,6 +25,11 @@ export interface Play {
   leaveValue: number
   tiles: AnalyzePlacedTile[]
   crossWords: string[]
+  // Present only for simulation-mode results.
+  winPct?: number
+  simEquity?: number
+  iterations?: number
+  stdErr?: number
 }
 
 export interface GameMove {

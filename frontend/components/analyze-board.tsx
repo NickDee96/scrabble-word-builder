@@ -65,7 +65,8 @@ export default function AnalyzeBoard({
   const [pasteOpen, setPasteOpen] = useState(false)
   const [pasteText, setPasteText] = useState("")
   const [copied, setCopied] = useState(false)
-  const [mode, setMode] = useState<"equity" | "score">("equity")
+  const [mode, setMode] = useState<"equity" | "score" | "simulation">("equity")
+  const [scoreMargin, setScoreMargin] = useState(0)
   const [undoStack, setUndoStack] = useState<Snapshot[]>([])
   const [redoStack, setRedoStack] = useState<Snapshot[]>([])
   const [reviewOpen, setReviewOpen] = useState(false)
@@ -149,14 +150,20 @@ export default function AnalyzeBoard({
     }
   }
 
-  const analyze = async (useMode: "equity" | "score" = mode) => {
+  const analyze = async (useMode: "equity" | "score" | "simulation" = mode) => {
     setIsAnalyzing(true)
     setError(null)
     try {
+      const payload: Record<string, unknown> = { board, rack, maxResults: 20, mode: useMode }
+      if (useMode === "simulation") {
+        payload.timeBudgetMs = 6000
+        payload.maxCandidates = 8
+        payload.scoreMargin = scoreMargin
+      }
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ board, rack, maxResults: 20, mode: useMode }),
+        body: JSON.stringify(payload),
       })
       if (!response.ok) {
         let detail = `Request failed (status ${response.status}).`
@@ -186,9 +193,10 @@ export default function AnalyzeBoard({
     }
   }
 
-  const changeMode = (m: "equity" | "score") => {
+  const changeMode = (m: "equity" | "score" | "simulation") => {
     setMode(m)
-    if (rack.trim() && plays.length > 0) analyze(m)
+    // Re-run automatically for the cheap modes; simulation is slow, so let the user trigger it.
+    if (m !== "simulation" && rack.trim() && plays.length > 0) analyze(m)
   }
 
   const commitPlay = (play: Play) => {
@@ -513,7 +521,7 @@ export default function AnalyzeBoard({
                 button) for a blank.
               </p>
             </div>
-            <div className="flex items-center gap-2 text-xs">
+            <div className="flex items-center gap-2 text-xs flex-wrap">
               <span className="text-muted-foreground">Rank by</span>
               <div className="inline-flex rounded-md border overflow-hidden">
                 <button
@@ -530,9 +538,37 @@ export default function AnalyzeBoard({
                 >
                   Score
                 </button>
+                <button
+                  type="button"
+                  onClick={() => changeMode("simulation")}
+                  className={`px-2.5 py-1 ${mode === "simulation" ? "bg-blue-600 text-white" : "bg-white hover:bg-muted"}`}
+                >
+                  Simulate
+                </button>
               </div>
-              <span className="text-muted-foreground hidden sm:inline">= score + tiles kept</span>
+              <span className="text-muted-foreground hidden sm:inline">
+                {mode === "equity"
+                  ? "= score + tiles kept"
+                  : mode === "score"
+                    ? "raw points"
+                    : "2-ply win %"}
+              </span>
             </div>
+            {mode === "simulation" && (
+              <div className="flex items-center gap-2 text-xs">
+                <Label htmlFor="score-margin" className="text-muted-foreground">
+                  Your lead
+                </Label>
+                <Input
+                  id="score-margin"
+                  type="number"
+                  value={scoreMargin}
+                  onChange={(e) => setScoreMargin(Number(e.target.value) || 0)}
+                  className="h-8 w-20"
+                />
+                <span className="text-muted-foreground">points now, for win %</span>
+              </div>
+            )}
             <Button
               onClick={() => analyze()}
               disabled={!rack.trim() || isAnalyzing}
@@ -541,11 +577,12 @@ export default function AnalyzeBoard({
               {isAnalyzing ? (
                 <>
                   <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
-                  Analyzing…
+                  {mode === "simulation" ? "Simulating…" : "Analyzing…"}
                 </>
               ) : (
                 <>
-                  <Sparkles className="w-4 h-4 mr-2" /> Find best plays
+                  <Sparkles className="w-4 h-4 mr-2" />
+                  {mode === "simulation" ? "Simulate best plays" : "Find best plays"}
                 </>
               )}
             </Button>
@@ -566,7 +603,13 @@ export default function AnalyzeBoard({
                 <Trophy className="w-5 h-5 text-yellow-500" /> Best plays
               </CardTitle>
               <p className="text-xs text-muted-foreground">
-                Ranked by {mode === "equity" ? "equity (score + leave)" : "score"}. Hover to preview; click to place.
+                Ranked by{" "}
+                {mode === "equity"
+                  ? "equity (score + leave)"
+                  : mode === "score"
+                    ? "score"
+                    : "win % (2-ply simulation)"}
+                . Hover to preview; click to place.
               </p>
             </CardHeader>
             <CardContent>
@@ -590,14 +633,27 @@ export default function AnalyzeBoard({
                       <span className="hidden md:inline">
                         {play.leave ? `keep ${play.leave}` : "uses all"}
                       </span>
-                      <span className="hidden sm:inline tabular-nums">
-                        {mode === "equity"
-                          ? `${play.score} pts`
-                          : `eq ${(play.equity ?? play.score).toFixed(1)}`}
-                      </span>
-                      <Badge className="bg-blue-600 text-white tabular-nums">
-                        {mode === "equity" ? (play.equity ?? play.score).toFixed(1) : play.score}
-                      </Badge>
+                      {mode === "simulation" ? (
+                        <>
+                          <span className="hidden sm:inline tabular-nums">
+                            {play.score} pts · n{play.iterations ?? 0}
+                          </span>
+                          <Badge className="bg-emerald-600 text-white tabular-nums">
+                            {play.winPct != null ? `${Math.round(play.winPct * 100)}%` : "—"}
+                          </Badge>
+                        </>
+                      ) : (
+                        <>
+                          <span className="hidden sm:inline tabular-nums">
+                            {mode === "equity"
+                              ? `${play.score} pts`
+                              : `eq ${(play.equity ?? play.score).toFixed(1)}`}
+                          </span>
+                          <Badge className="bg-blue-600 text-white tabular-nums">
+                            {mode === "equity" ? (play.equity ?? play.score).toFixed(1) : play.score}
+                          </Badge>
+                        </>
+                      )}
                     </span>
                   </button>
                 ))}
