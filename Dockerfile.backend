@@ -17,6 +17,7 @@ COPY app.py .
 COPY scrabble.py .
 COPY scrabble_engine.py .
 COPY ["Collins Scrabble Words (2019).txt", "."]
+COPY templates/ ./templates/
 
 # Expose port 5000
 EXPOSE 5000
