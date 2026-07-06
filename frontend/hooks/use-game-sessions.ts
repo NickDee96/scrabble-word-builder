@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import type { WordResult } from "@/lib/scoring"
+import { emptyBoard, type BoardCell, type Play } from "@/lib/board"
 
 export interface GameSession {
   id: string
@@ -9,6 +10,8 @@ export interface GameSession {
   letters: string
   boardLetters: string
   results: WordResult[]
+  boardCells: (BoardCell | null)[][]
+  plays: Play[]
   createdAt: number
   updatedAt: number
 }
@@ -22,7 +25,17 @@ function newId(): string {
 
 function createSession(name: string): GameSession {
   const now = Date.now()
-  return { id: newId(), name, letters: "", boardLetters: "", results: [], createdAt: now, updatedAt: now }
+  return {
+    id: newId(),
+    name,
+    letters: "",
+    boardLetters: "",
+    results: [],
+    boardCells: emptyBoard(),
+    plays: [],
+    createdAt: now,
+    updatedAt: now,
+  }
 }
 
 /**

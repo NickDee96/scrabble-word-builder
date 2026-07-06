@@ -10,8 +10,9 @@ import { Separator } from "@/components/ui/separator"
 import { Search, Shuffle, Trophy, Zap, BookOpen, Target, Grid3X3, AlertCircle, SearchX } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import ScrabbleBoard from "@/components/scrabble-board"
+import AnalyzeBoard from "@/components/analyze-board"
 import { getScoreColor, groupResultsByLength, type WordResult } from "@/lib/scoring"
+import { emptyBoard, type BoardCell, type Play } from "@/lib/board"
 import { useGameSessions } from "@/hooks/use-game-sessions"
 import SessionBar from "@/components/session-bar"
 
@@ -31,9 +32,13 @@ export default function ScrabbleWordBuilder() {
   const letters = activeSession?.letters ?? ""
   const boardLetters = activeSession?.boardLetters ?? ""
   const results = activeSession?.results ?? []
+  const boardCells = activeSession?.boardCells ?? emptyBoard()
+  const plays = activeSession?.plays ?? []
   const setLetters = (value: string) => updateActive({ letters: value })
   const setBoardLetters = (value: string) => updateActive({ boardLetters: value })
   const setResults = (value: WordResult[]) => updateActive({ results: value })
+  const setBoardCells = (value: (BoardCell | null)[][]) => updateActive({ boardCells: value })
+  const setPlays = (value: Play[]) => updateActive({ plays: value })
 
   const [isLoading, setIsLoading] = useState(false)
   const [activeTab, setActiveTab] = useState("builder")
@@ -108,17 +113,6 @@ export default function ScrabbleWordBuilder() {
 
   const groupedResults = groupResultsByLength(results)
 
-  const handleBoardChange = (board: any) => {
-    // Extract placed letters from board for analysis
-    const placedLetters = board
-      .flat()
-      .filter((square: any) => square.isPlaced && square.letter)
-      .map((square: any) => square.letter)
-      .join("")
-
-    setBoardLetters(placedLetters)
-  }
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       {/* Header */}
@@ -167,7 +161,7 @@ export default function ScrabbleWordBuilder() {
             </TabsTrigger>
             <TabsTrigger value="board" className="flex items-center space-x-2">
               <Grid3X3 className="w-4 h-4" />
-              <span>Interactive Board</span>
+              <span>Board Analyzer</span>
             </TabsTrigger>
             <TabsTrigger value="strategy" className="flex items-center space-x-2">
               <Target className="w-4 h-4" />
@@ -310,7 +304,15 @@ export default function ScrabbleWordBuilder() {
           </TabsContent>
 
           <TabsContent value="board" className="space-y-6">
-            <ScrabbleBoard key={activeId} availableLetters={letters} onBoardChange={handleBoardChange} />
+            <AnalyzeBoard
+              key={activeId}
+              board={boardCells}
+              onBoardChange={setBoardCells}
+              rack={letters}
+              onRackChange={setLetters}
+              plays={plays}
+              onPlaysChange={setPlays}
+            />
           </TabsContent>
 
           <TabsContent value="strategy" className="space-y-6">
