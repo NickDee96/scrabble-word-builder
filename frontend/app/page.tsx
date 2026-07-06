@@ -11,12 +11,7 @@ import { Search, Shuffle, Trophy, Zap, BookOpen, Target, Grid3X3, AlertCircle, S
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import ScrabbleBoard from "@/components/scrabble-board"
-
-interface WordResult {
-  word: string
-  score: number
-  length: number
-}
+import { getScoreColor, groupResultsByLength, type WordResult } from "@/lib/scoring"
 
 export default function ScrabbleWordBuilder() {
   const [letters, setLetters] = useState("WERTASH")
@@ -86,23 +81,7 @@ export default function ScrabbleWordBuilder() {
     setHasSearched(false)
   }
 
-  const groupedResults = results.reduce(
-    (acc, result) => {
-      if (!acc[result.length]) {
-        acc[result.length] = []
-      }
-      acc[result.length].push(result)
-      return acc
-    },
-    {} as Record<number, WordResult[]>,
-  )
-
-  const getScoreColor = (score: number) => {
-    if (score >= 15) return "bg-red-500"
-    if (score >= 10) return "bg-orange-500"
-    if (score >= 7) return "bg-yellow-500"
-    return "bg-green-500"
-  }
+  const groupedResults = groupResultsByLength(results)
 
   const handleBoardChange = (board: any) => {
     // Extract placed letters from board for analysis

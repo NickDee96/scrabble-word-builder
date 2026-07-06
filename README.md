@@ -115,6 +115,31 @@ The frontend will run on http://localhost:3000
 #### 3. Test Integration
 Open `test-connection.html` in a browser to verify both services are running correctly.
 
+## ⚙️ Configuration
+
+All configuration is environment-driven; every value has a sensible default, so the app
+runs with no setup. See [`.env.example`](.env.example) for a copy-paste template.
+
+### Backend (FastAPI)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENVIRONMENT` | `development` | Environment label (informational) |
+| `PORT` | `5000` | Port Uvicorn listens on |
+| `ALLOWED_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | Comma-separated CORS allowlist |
+| `MAX_RACK_TILES` | `10` | Max tiles (letters + blanks) per request |
+| `MAX_BLANKS` | `2` | Max blank tiles per request |
+| `MAX_BOARD_LETTERS` | `15` | Max board letters per request |
+| `RATE_LIMIT_FIND_WORDS` | `30/minute` | Rate limit for `/api/find-words` |
+
+### Frontend (Next.js)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NEXT_PUBLIC_API_URL` | `http://localhost:5000` | Backend base URL the Next.js server proxies `/api/*` to |
+
+Set the frontend value in `frontend/.env.local`.
+
 ## 🔧 API Endpoints
 
 ### Backend API (FastAPI - Port 5000)

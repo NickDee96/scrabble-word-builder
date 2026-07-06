@@ -93,9 +93,9 @@ ordered by priority. Legend: 🔴 critical · 🟠 high · 🟡 medium · 🟢 n
 ## Phase 3 — Testing & CI 🟠
 
 - [x] **T3.1** 🟠 Backend tests: engine + API (`pytest`, `httpx`/`TestClient`).
-- [ ] **T3.2** 🟡 Frontend smoke test (`vitest`/RTL or a Playwright happy-path).
-- [ ] **T3.3** 🟠 GitHub Actions CI: lint + type-check + tests + `docker build` on PR.
-- [ ] **T3.4** 🟡 Add `.env.example` and a "Configuration" section documenting every var.
+- [x] **T3.2** 🟡 Frontend smoke test (`vitest`/RTL or a Playwright happy-path).
+- [x] **T3.3** 🟠 GitHub Actions CI: tests + `docker build` on PR (lint/type-check deferred while `next.config` ignore flags remain).
+- [x] **T3.4** 🟡 Add `.env.example` and a "Configuration" section documenting every var.
 
 ---
 
@@ -144,6 +144,6 @@ rewrite) guarded by those tests.
 | 0 | Truth & Hygiene | 🔴 | ✅ Done |
 | 1 | Core Engine & Correctness | 🔴 | ✅ Done |
 | 2 | Security & Robustness | 🟠 | ✅ Done |
-| 3 | Testing & CI | 🟠 | 🚧 In progress |
+| 3 | Testing & CI | 🟠 | ✅ Done |
 | 4 | Creative Features | 🟢 | ☐ Not started |
 | 5 | Polish & Delight | 🟢 | ☐ Not started |
