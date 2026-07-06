@@ -107,9 +107,13 @@ def _empty_board():
 def test_analyze_opening_play():
     response = client.post("/api/analyze", json={"board": _empty_board(), "rack": "AT"})
     assert response.status_code == 200
-    words = {p["word"]: p for p in response.json()["plays"]}
+    plays = response.json()["plays"]
+    words = {p["word"]: p for p in plays}
     assert "AT" in words
     assert words["AT"]["score"] == 4  # centre double-word square
+    # the recommendation list shows each word once (best placement)
+    word_list = [p["word"] for p in plays]
+    assert len(word_list) == len(set(word_list))
 
 
 def test_analyze_rejects_bad_board_shape():

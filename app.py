@@ -207,6 +207,17 @@ async def api_analyze(request: Request, data: AnalyzeRequest):
 
     moves = generate_moves(letters, blanks, rack)
     limit = max(1, min(data.maxResults, 50))
+
+    # Recommendation list: keep the best-scoring placement of each distinct word
+    # (moves are already sorted by descending score) so the same word does not repeat.
+    seen_words: set = set()
+    unique = []
+    for move in moves:
+        if move.word in seen_words:
+            continue
+        seen_words.add(move.word)
+        unique.append(move)
+
     plays = [
         PlayOut(
             word=m.word,
@@ -221,7 +232,7 @@ async def api_analyze(request: Request, data: AnalyzeRequest):
             ],
             crossWords=m.cross_words,
         )
-        for m in moves[:limit]
+        for m in unique[:limit]
     ]
     return AnalyzeResponse(plays=plays, total=len(moves), message=f"Found {len(moves)} plays")
 
