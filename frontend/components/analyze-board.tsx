@@ -69,6 +69,7 @@ export default function AnalyzeBoard({
   const [undoStack, setUndoStack] = useState<Snapshot[]>([])
   const [redoStack, setRedoStack] = useState<Snapshot[]>([])
   const [reviewOpen, setReviewOpen] = useState(false)
+  const [blankMode, setBlankMode] = useState(false)
   const gridRef = useRef<HTMLDivElement>(null)
 
   const ghost = useMemo(() => {
@@ -131,7 +132,7 @@ export default function AnalyzeBoard({
     const { row, col } = selected
     if (/^[a-zA-Z]$/.test(e.key)) {
       e.preventDefault()
-      setCell(row, col, { letter: e.key.toUpperCase(), blank: e.shiftKey })
+      setCell(row, col, { letter: e.key.toUpperCase(), blank: blankMode || e.shiftKey })
       if (col < BOARD_SIZE - 1) setSelected({ row, col: col + 1 })
     } else if (e.key === "Backspace" || e.key === "Delete") {
       e.preventDefault()
@@ -395,11 +396,30 @@ export default function AnalyzeBoard({
             </div>
           </CardTitle>
           <p className="text-xs text-muted-foreground">
-            Click a square and type to enter the tiles already on the board. Hold{" "}
-            <kbd className="px-1 rounded bg-muted">Shift</kbd> for a blank. Arrow keys move.
+            Click a square and type to enter tiles. Use the <b>Blank tiles</b> toggle below (or
+            hold <kbd className="px-1 rounded bg-muted">Shift</kbd>) to place a blank. Arrow keys move.
           </p>
         </CardHeader>
         <CardContent>
+          <div className="flex items-center justify-center gap-2 mb-3 text-xs">
+            <span className="text-muted-foreground">Placing</span>
+            <div className="inline-flex rounded-md border overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setBlankMode(false)}
+                className={`px-2.5 py-1 ${!blankMode ? "bg-yellow-400 text-gray-900" : "bg-white hover:bg-muted"}`}
+              >
+                Normal tiles
+              </button>
+              <button
+                type="button"
+                onClick={() => setBlankMode(true)}
+                className={`px-2.5 py-1 ${blankMode ? "bg-purple-500 text-white" : "bg-white hover:bg-muted"}`}
+              >
+                Blank tiles
+              </button>
+            </div>
+          </div>
           <div className="flex justify-center">
             <div
               ref={gridRef}
@@ -418,7 +438,7 @@ export default function AnalyzeBoard({
                   if (cell) {
                     content = cell.letter
                     classes = cell.blank
-                      ? "bg-yellow-50 text-gray-500 border-yellow-300"
+                      ? "bg-purple-200 text-purple-800 border-purple-400 shadow-sm"
                       : "bg-yellow-100 text-gray-800 border-yellow-400 shadow-sm"
                   } else if (ghostLetter) {
                     content = ghostLetter
@@ -465,15 +485,33 @@ export default function AnalyzeBoard({
               <Label htmlFor="analyze-rack" className="text-sm">
                 Tiles on your rack
               </Label>
-              <Input
-                id="analyze-rack"
-                value={rack}
-                onChange={(e) => onRackChange(e.target.value.toUpperCase().replace(/[^A-Z?]/g, ""))}
-                placeholder="e.g. AEINRST"
-                maxLength={7}
-                className="text-lg font-mono tracking-wider"
-              />
-              <p className="text-xs text-muted-foreground">Use ? for a blank tile.</p>
+              <div className="flex gap-2">
+                <Input
+                  id="analyze-rack"
+                  value={rack}
+                  onChange={(e) =>
+                    onRackChange(
+                      e.target.value.toUpperCase().replace(/\s/g, "?").replace(/[^A-Z?]/g, ""),
+                    )
+                  }
+                  placeholder="e.g. AEINR?T"
+                  maxLength={7}
+                  className="flex-1 text-lg font-mono tracking-wider"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => rack.length < 7 && onRackChange(rack + "?")}
+                  disabled={rack.length >= 7}
+                  title="Add a blank tile"
+                >
+                  + Blank
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Type letters, plus <kbd className="px-1 rounded bg-muted">?</kbd> or a space (or the
+                button) for a blank.
+              </p>
             </div>
             <div className="flex items-center gap-2 text-xs">
               <span className="text-muted-foreground">Rank by</span>
