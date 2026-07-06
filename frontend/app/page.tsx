@@ -24,12 +24,14 @@ export default function ScrabbleWordBuilder() {
   const [isLoading, setIsLoading] = useState(false)
   const [activeTab, setActiveTab] = useState("builder")
 
-  // Function to find words by calling the Flask API
+  // Function to find words by calling the backend API. The request uses a
+  // same-origin relative URL that Next.js rewrites proxy to the backend, so the
+  // same build works locally and in Docker without hardcoded hosts or CORS.
   const findWords = async () => {
     setIsLoading(true)
 
     try {
-      const response = await fetch('http://localhost:5000/api/find-words', {
+      const response = await fetch('/api/find-words', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

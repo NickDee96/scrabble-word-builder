@@ -2,9 +2,16 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'v0 App',
-  description: 'Created with v0',
-  generator: 'v0.dev',
+  title: 'Scrabble Word Builder',
+  description:
+    'Find every valid word you can play from your letters — ranked by score, with an interactive Scrabble board.',
+  keywords: ['Scrabble', 'word finder', 'anagram solver', 'word game', 'Collins Scrabble Words'],
+  authors: [{ name: 'Nick Mumero' }],
+  openGraph: {
+    title: 'Scrabble Word Builder',
+    description: 'Find every valid word you can play from your letters — ranked by score.',
+    type: 'website',
+  },
 }
 
 export default function RootLayout({
