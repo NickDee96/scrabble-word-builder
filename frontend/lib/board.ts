@@ -92,3 +92,35 @@ export function emptyBoard(): (BoardCell | null)[][] {
     Array.from({ length: BOARD_SIZE }, () => null as BoardCell | null),
   )
 }
+
+/** Serialize a board to a 15-line grid: uppercase = tile, lowercase = blank tile, "." = empty. */
+export function boardToText(board: (BoardCell | null)[][]): string {
+  return board
+    .map((row) =>
+      row
+        .map((cell) =>
+          cell ? (cell.blank ? cell.letter.toLowerCase() : cell.letter.toUpperCase()) : ".",
+        )
+        .join(""),
+    )
+    .join("\n")
+}
+
+/**
+ * Parse a text grid (see {@link boardToText}) into a board. One character per square:
+ * uppercase = a tile, lowercase = a blank tile, anything else ("." or space) = empty.
+ * Extra rows/columns are ignored; missing ones are left empty.
+ */
+export function parseBoardText(text: string): (BoardCell | null)[][] {
+  const board = emptyBoard()
+  const lines = text.replace(/\r/g, "").split("\n")
+  for (let r = 0; r < Math.min(lines.length, BOARD_SIZE); r++) {
+    const line = lines[r]
+    for (let c = 0; c < Math.min(line.length, BOARD_SIZE); c++) {
+      const ch = line[c]
+      if (ch >= "A" && ch <= "Z") board[r][c] = { letter: ch, blank: false }
+      else if (ch >= "a" && ch <= "z") board[r][c] = { letter: ch.toUpperCase(), blank: true }
+    }
+  }
+  return board
+}

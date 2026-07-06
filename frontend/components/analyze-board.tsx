@@ -7,11 +7,22 @@ import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Sparkles, Trash2, AlertCircle, Trophy } from "lucide-react"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Textarea } from "@/components/ui/textarea"
+import { Sparkles, Trash2, AlertCircle, Trophy, Copy, ClipboardPaste } from "lucide-react"
 import {
   BOARD_SIZE,
+  boardToText,
   cellLabel,
   emptyBoard,
+  parseBoardText,
   premiumClasses,
   premiumLabel,
   premiumType,
@@ -40,6 +51,9 @@ export default function AnalyzeBoard({
   const [hover, setHover] = useState<Play | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [pasteOpen, setPasteOpen] = useState(false)
+  const [pasteText, setPasteText] = useState("")
+  const [copied, setCopied] = useState(false)
   const gridRef = useRef<HTMLDivElement>(null)
 
   const ghost = useMemo(() => {
@@ -135,16 +149,71 @@ export default function AnalyzeBoard({
     setSelected(null)
   }
 
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(boardToText(board))
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      /* clipboard unavailable */
+    }
+  }
+
+  const openPaste = () => {
+    setPasteText(boardToText(board))
+    setPasteOpen(true)
+  }
+
+  const loadPasted = () => {
+    onBoardChange(parseBoardText(pasteText))
+    onPlaysChange([])
+    setHover(null)
+    setSelected(null)
+    setPasteOpen(false)
+  }
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[auto_1fr] gap-6">
+      <Dialog open={pasteOpen} onOpenChange={setPasteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Paste board position</DialogTitle>
+            <DialogDescription>
+              One character per square, up to 15 columns × 15 rows. Uppercase = a tile,
+              lowercase = a blank tile, and <code>.</code> or a space = empty.
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            value={pasteText}
+            onChange={(e) => setPasteText(e.target.value)}
+            rows={15}
+            spellCheck={false}
+            className="font-mono text-xs leading-tight whitespace-pre"
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPasteOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={loadPasted}>Load board</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {/* Board editor */}
       <Card className="shadow-lg border-0 bg-white/70 backdrop-blur-sm">
         <CardHeader>
           <CardTitle className="flex items-center justify-between gap-2">
             <span>Board Position</span>
-            <Button variant="outline" size="sm" onClick={clearBoard}>
-              <Trash2 className="w-4 h-4 mr-1" /> Clear
-            </Button>
+            <div className="flex items-center gap-1.5">
+              <Button variant="outline" size="sm" onClick={handleCopy}>
+                <Copy className="w-4 h-4 mr-1" /> {copied ? "Copied!" : "Copy"}
+              </Button>
+              <Button variant="outline" size="sm" onClick={openPaste}>
+                <ClipboardPaste className="w-4 h-4 mr-1" /> Paste
+              </Button>
+              <Button variant="outline" size="sm" onClick={clearBoard}>
+                <Trash2 className="w-4 h-4 mr-1" /> Clear
+              </Button>
+            </div>
           </CardTitle>
           <p className="text-xs text-muted-foreground">
             Click a square and type to enter the tiles already on the board. Hold{" "}
