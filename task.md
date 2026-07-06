@@ -129,6 +129,22 @@ ordered by priority. Legend: 🔴 critical · 🟠 high · 🟡 medium · 🟢 n
 
 ---
 
+## Phase 6 — Best-Play Simulation Engine 🔵 (major, see [best-play-engine-plan.md](best-play-engine-plan.md))
+
+A Maven/Quackle-class board analyzer: replicate the board state, generate all legal plays,
+rank by **equity** (score + rack leave), then run **Monte-Carlo look-ahead** to recommend the
+move with the best **win %**. Full design, math, and references live in
+[best-play-engine-plan.md](best-play-engine-plan.md).
+
+- [ ] **T6.A** 🔴 Board model + legal move generation (GADDAG, anchors, cross-checks, blanks).
+- [ ] **T6.B** 🔴 Positional scoring (fresh premiums, cross-words, bingo bonus) + golden tests.
+- [ ] **T6.C** 🟠 Static evaluation (`score + leave`); import or bootstrap a leave table; `/api/analyze?mode=equity`.
+- [ ] **T6.D** 🟠 Monte-Carlo simulation (2-ply, unseen-tile sampling, win% table, UCB early-stop); compiled move-gen for speed.
+- [ ] **T6.E** 🟠 Frontend: board capture, mode toggle, ranked plays + on-board overlay, live tile tracker.
+- [ ] **T6.F** 🟢 Stretch: exact endgame solver, opponent inference (Richards & Amir), ML leave estimator.
+
+---
+
 ## Quick-Win Starter Set
 
 If picking a first batch, do these together for maximum visible impact with low risk:
@@ -147,3 +163,4 @@ rewrite) guarded by those tests.
 | 3 | Testing & CI | 🟠 | ✅ Done |
 | 4 | Creative Features | 🟢 | ☐ Not started |
 | 5 | Polish & Delight | 🟢 | ☐ Not started |
+| 6 | Best-Play Simulation Engine | 🔵 | 📋 Planned — see best-play-engine-plan.md |
