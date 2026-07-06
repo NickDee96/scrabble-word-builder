@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { AlertCircle, Play, Pause, RotateCcw, StepForward, Swords, Trophy } from "lucide-react"
+import { AlertCircle, BarChart3, Play, Pause, RotateCcw, StepForward, Swords, Trophy } from "lucide-react"
 import {
   BOARD_SIZE,
   cellLabel,
@@ -16,7 +17,7 @@ import {
   premiumType,
 } from "@/lib/board"
 
-type AgentType = "equity" | "simulation"
+type AgentType = "equity" | "score" | "simulation"
 
 interface GameState {
   board: string
@@ -48,6 +49,7 @@ interface MoveInfo {
 
 const AGENT_LABEL: Record<AgentType, string> = {
   equity: "Equity",
+  score: "Score",
   simulation: "Monte-Carlo",
 }
 
@@ -55,6 +57,18 @@ const PLAYER_ACCENT: Record<"A" | "B", string> = {
   A: "bg-blue-600",
   B: "bg-purple-600",
 }
+
+interface BatchStats {
+  games: number
+  aWins: number
+  bWins: number
+  ties: number
+  aTotal: number
+  bTotal: number
+  marginTotal: number
+}
+
+const pct = (n: number, d: number) => (d ? Math.round((n / d) * 100) : 0)
 
 export default function AgentsArena() {
   const [game, setGame] = useState<GameState | null>(null)
@@ -66,11 +80,16 @@ export default function AgentsArena() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [lastTiles, setLastTiles] = useState<Set<string>>(new Set())
+  const [numGames, setNumGames] = useState(20)
+  const [batchRunning, setBatchRunning] = useState(false)
+  const [batchDone, setBatchDone] = useState(0)
+  const [stats, setStats] = useState<BatchStats | null>(null)
 
   const runningRef = useRef(false)
   const gameRef = useRef<GameState | null>(null)
   const agentsRef = useRef({ A: agentA, B: agentB })
   const budgetRef = useRef(budget)
+  const batchRunningRef = useRef(false)
 
   useEffect(() => {
     gameRef.current = game
@@ -83,6 +102,7 @@ export default function AgentsArena() {
   }, [budget])
   useEffect(() => () => {
     runningRef.current = false
+    batchRunningRef.current = false
   }, [])
 
   const board = game ? parseBoardText(game.board) : null
@@ -171,19 +191,81 @@ export default function AgentsArena() {
     setRunning(false)
   }
 
+  const runBatch = async () => {
+    if (batchRunning) return
+    runningRef.current = false
+    setRunning(false)
+    const n = Math.max(1, Math.min(numGames || 1, 100))
+    batchRunningRef.current = true
+    setBatchRunning(true)
+    setError(null)
+    setBatchDone(0)
+    const acc: BatchStats = {
+      games: 0, aWins: 0, bWins: 0, ties: 0, aTotal: 0, bTotal: 0, marginTotal: 0,
+    }
+    setStats({ ...acc })
+    for (let i = 0; i < n; i++) {
+      if (!batchRunningRef.current) break
+      const first = i % 2 === 0 ? "A" : "B"
+      try {
+        const res = await fetch("/api/selfplay/game", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            agents: agentsRef.current,
+            timeBudgetMs: budgetRef.current,
+            maxCandidates: 8,
+            first,
+          }),
+        })
+        if (!res.ok) {
+          setError(
+            res.status === 429
+              ? "Slowing down \u2014 the server is rate-limiting games. Try again in a moment."
+              : `Game failed (status ${res.status}).`,
+          )
+          break
+        }
+        const g = (await res.json()) as {
+          scores: { A: number; B: number }
+          winner: "A" | "B" | "tie"
+        }
+        acc.games += 1
+        acc.aTotal += g.scores.A
+        acc.bTotal += g.scores.B
+        acc.marginTotal += g.scores.A - g.scores.B
+        if (g.winner === "A") acc.aWins += 1
+        else if (g.winner === "B") acc.bWins += 1
+        else acc.ties += 1
+        setStats({ ...acc })
+        setBatchDone(i + 1)
+      } catch {
+        setError("Could not reach the server.")
+        break
+      }
+    }
+    batchRunningRef.current = false
+    setBatchRunning(false)
+  }
+
+  const stopBatch = () => {
+    batchRunningRef.current = false
+    setBatchRunning(false)
+  }
+
   const agentToggle = (
     value: AgentType,
     onChange: (v: AgentType) => void,
     accent: string,
   ) => (
     <div className="inline-flex rounded-md border overflow-hidden text-xs">
-      {(["equity", "simulation"] as AgentType[]).map((t) => (
+      {(["equity", "score", "simulation"] as AgentType[]).map((t) => (
         <button
           key={t}
           type="button"
-          disabled={running}
+          disabled={running || batchRunning}
           onClick={() => onChange(t)}
-          className={`px-2.5 py-1 disabled:opacity-60 ${
+          className={`px-2 py-1 disabled:opacity-60 ${
             value === t ? `${accent} text-white` : "bg-white hover:bg-muted"
           }`}
         >
@@ -242,8 +324,8 @@ export default function AgentsArena() {
             <Swords className="w-5 h-5 text-purple-600" /> Agents Arena
           </CardTitle>
           <p className="text-xs text-muted-foreground">
-            Watch an <b>Equity</b> player and a <b>Monte-Carlo</b> player play a full game. Pick each
-            side, then step or auto-play.
+            Pit an <b>Equity</b>, <b>Score</b>, or <b>Monte-Carlo</b> agent against each other. Pick
+            each side, then step or auto-play.
           </p>
         </CardHeader>
         <CardContent>
@@ -294,13 +376,13 @@ export default function AgentsArena() {
             <CardTitle className="text-lg">Match</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">Agent A</Label>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Label className="text-xs text-muted-foreground w-14 shrink-0">Agent A</Label>
                 {agentToggle(agentA, setAgentA, "bg-blue-600")}
               </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">Agent B</Label>
+              <div className="flex items-center gap-2">
+                <Label className="text-xs text-muted-foreground w-14 shrink-0">Agent B</Label>
                 {agentToggle(agentB, setAgentB, "bg-purple-600")}
               </div>
             </div>
@@ -309,8 +391,9 @@ export default function AgentsArena() {
               <Label className="text-muted-foreground">MC time / move</Label>
               <select
                 value={budget}
-                disabled={running}
+                disabled={running || batchRunning}
                 onChange={(e) => setBudget(Number(e.target.value))}
+                aria-label="Monte-Carlo time per move"
                 className="h-8 rounded-md border bg-white px-2 disabled:opacity-60"
               >
                 <option value={1000}>1s</option>
@@ -322,10 +405,10 @@ export default function AgentsArena() {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Button onClick={newGame} disabled={busy} variant="outline">
+              <Button onClick={newGame} disabled={busy || batchRunning} variant="outline">
                 <RotateCcw className="w-4 h-4 mr-1" /> New game
               </Button>
-              <Button onClick={stepOnce} disabled={!game || game.over || busy || running} variant="outline">
+              <Button onClick={stepOnce} disabled={!game || game.over || busy || running || batchRunning} variant="outline">
                 <StepForward className="w-4 h-4 mr-1" /> Step
               </Button>
               {running ? (
@@ -335,7 +418,7 @@ export default function AgentsArena() {
               ) : (
                 <Button
                   onClick={startAuto}
-                  disabled={!game || game.over || busy}
+                  disabled={!game || game.over || busy || batchRunning}
                   className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
                 >
                   <Play className="w-4 h-4 mr-1" /> Auto-play
@@ -386,6 +469,110 @@ export default function AgentsArena() {
                 <AlertTitle>Problem</AlertTitle>
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Head-to-head batch */}
+        <Card className="shadow-lg border-0 bg-white/70 backdrop-blur-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <BarChart3 className="w-5 h-5 text-emerald-600" /> Head-to-head
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Run a batch — {AGENT_LABEL[agentA]} (A) vs {AGENT_LABEL[agentB]} (B), alternating who
+              starts each game for fairness.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Label htmlFor="num-games" className="text-xs text-muted-foreground">
+                Games
+              </Label>
+              <Input
+                id="num-games"
+                type="number"
+                min={1}
+                max={100}
+                value={numGames}
+                disabled={batchRunning}
+                onChange={(e) => setNumGames(Math.max(1, Math.min(Number(e.target.value) || 1, 100)))}
+                className="h-8 w-20"
+              />
+              {batchRunning ? (
+                <Button onClick={stopBatch} className="bg-red-600 hover:bg-red-700">
+                  <Pause className="w-4 h-4 mr-1" /> Stop
+                </Button>
+              ) : (
+                <Button
+                  onClick={runBatch}
+                  disabled={busy || running}
+                  className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700"
+                >
+                  <Play className="w-4 h-4 mr-1" /> Run {numGames} games
+                </Button>
+              )}
+              {(batchRunning || (stats && stats.games > 0)) && (
+                <span className="text-xs text-muted-foreground tabular-nums">
+                  {batchDone}/{numGames}
+                  {batchRunning ? " …" : ""}
+                </span>
+              )}
+            </div>
+
+            {(agentA === "simulation" || agentB === "simulation") && (
+              <p className="text-[11px] text-amber-600">
+                Monte-Carlo games are slow (~{(budget / 1000).toFixed(0)}s per move); a large batch
+                can take several minutes.
+              </p>
+            )}
+
+            {batchRunning && (
+              <div className="h-1.5 w-full rounded bg-muted overflow-hidden">
+                <div
+                  className="h-full bg-emerald-500 transition-all"
+                  style={{ width: `${(batchDone / Math.max(1, numGames)) * 100}%` }}
+                />
+              </div>
+            )}
+
+            {stats && stats.games > 0 && (
+              <div className="space-y-2">
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="rounded-lg border p-2">
+                    <div className="text-[11px] text-muted-foreground truncate">
+                      A · {AGENT_LABEL[agentA]}
+                    </div>
+                    <div className="text-2xl font-bold text-blue-600 tabular-nums">{stats.aWins}</div>
+                    <div className="text-[11px] text-muted-foreground">
+                      {pct(stats.aWins, stats.games)}% wins
+                    </div>
+                  </div>
+                  <div className="rounded-lg border p-2">
+                    <div className="text-[11px] text-muted-foreground">Ties</div>
+                    <div className="text-2xl font-bold tabular-nums">{stats.ties}</div>
+                    <div className="text-[11px] text-muted-foreground">of {stats.games}</div>
+                  </div>
+                  <div className="rounded-lg border p-2">
+                    <div className="text-[11px] text-muted-foreground truncate">
+                      B · {AGENT_LABEL[agentB]}
+                    </div>
+                    <div className="text-2xl font-bold text-purple-600 tabular-nums">{stats.bWins}</div>
+                    <div className="text-[11px] text-muted-foreground">
+                      {pct(stats.bWins, stats.games)}% wins
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                  <span>
+                    Avg score — A <b>{(stats.aTotal / stats.games).toFixed(1)}</b> · B{" "}
+                    <b>{(stats.bTotal / stats.games).toFixed(1)}</b>
+                  </span>
+                  <span>
+                    Avg margin (A−B) <b>{(stats.marginTotal / stats.games).toFixed(1)}</b>
+                  </span>
+                </div>
+              </div>
             )}
           </CardContent>
         </Card>
