@@ -7,10 +7,11 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import { Search, Shuffle, Trophy, Zap, BookOpen, Target, Grid3X3, AlertCircle, SearchX } from "lucide-react"
+import { Search, Shuffle, Trophy, Zap, BookOpen, Target, Grid3X3, AlertCircle, SearchX, Swords } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import AnalyzeBoard from "@/components/analyze-board"
+import AgentsArena from "@/components/agents-arena"
 import { getScoreColor, groupResultsByLength, type WordResult } from "@/lib/scoring"
 import { emptyBoard, type BoardCell, type GameMove, type Play } from "@/lib/board"
 import { useGameSessions } from "@/hooks/use-game-sessions"
@@ -156,7 +157,7 @@ export default function ScrabbleWordBuilder() {
           </div>
         )}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-3 mb-8">
+          <TabsList className="grid w-full grid-cols-4 mb-8">
             <TabsTrigger value="builder" className="flex items-center space-x-2">
               <Search className="w-4 h-4" />
               <span>Word Builder</span>
@@ -164,6 +165,10 @@ export default function ScrabbleWordBuilder() {
             <TabsTrigger value="board" className="flex items-center space-x-2">
               <Grid3X3 className="w-4 h-4" />
               <span>Board Analyzer</span>
+            </TabsTrigger>
+            <TabsTrigger value="arena" className="flex items-center space-x-2">
+              <Swords className="w-4 h-4" />
+              <span>Agents Arena</span>
             </TabsTrigger>
             <TabsTrigger value="strategy" className="flex items-center space-x-2">
               <Target className="w-4 h-4" />
@@ -317,6 +322,10 @@ export default function ScrabbleWordBuilder() {
               moveLog={moveLog}
               onMoveLogChange={setMoveLog}
             />
+          </TabsContent>
+
+          <TabsContent value="arena" className="space-y-6">
+            <AgentsArena />
           </TabsContent>
 
           <TabsContent value="strategy" className="space-y-6">
