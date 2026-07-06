@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -12,15 +12,40 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import ScrabbleBoard from "@/components/scrabble-board"
 import { getScoreColor, groupResultsByLength, type WordResult } from "@/lib/scoring"
+import { useGameSessions } from "@/hooks/use-game-sessions"
+import SessionBar from "@/components/session-bar"
 
 export default function ScrabbleWordBuilder() {
-  const [letters, setLetters] = useState("WERTASH")
-  const [boardLetters, setBoardLetters] = useState("")
-  const [results, setResults] = useState<WordResult[]>([])
+  const {
+    sessions,
+    activeSession,
+    activeId,
+    hydrated,
+    addSession,
+    switchSession,
+    renameSession,
+    deleteSession,
+    updateActive,
+  } = useGameSessions()
+
+  const letters = activeSession?.letters ?? ""
+  const boardLetters = activeSession?.boardLetters ?? ""
+  const results = activeSession?.results ?? []
+  const setLetters = (value: string) => updateActive({ letters: value })
+  const setBoardLetters = (value: string) => updateActive({ boardLetters: value })
+  const setResults = (value: WordResult[]) => updateActive({ results: value })
+
   const [isLoading, setIsLoading] = useState(false)
   const [activeTab, setActiveTab] = useState("builder")
   const [error, setError] = useState<string | null>(null)
   const [hasSearched, setHasSearched] = useState(false)
+
+  // Reset transient UI state when switching between game sessions.
+  useEffect(() => {
+    setIsLoading(false)
+    setError(null)
+    setHasSearched(false)
+  }, [activeId])
 
   // Function to find words by calling the backend API. The request uses a
   // same-origin relative URL that Next.js rewrites proxy to the backend, so the
@@ -122,6 +147,18 @@ export default function ScrabbleWordBuilder() {
       </header>
 
       <div className="container mx-auto px-4 py-8">
+        {hydrated && (
+          <div className="mb-6">
+            <SessionBar
+              sessions={sessions}
+              activeId={activeId}
+              onSwitch={switchSession}
+              onAdd={addSession}
+              onRename={renameSession}
+              onDelete={deleteSession}
+            />
+          </div>
+        )}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid w-full grid-cols-3 mb-8">
             <TabsTrigger value="builder" className="flex items-center space-x-2">
@@ -273,7 +310,7 @@ export default function ScrabbleWordBuilder() {
           </TabsContent>
 
           <TabsContent value="board" className="space-y-6">
-            <ScrabbleBoard availableLetters={letters} onBoardChange={handleBoardChange} />
+            <ScrabbleBoard key={activeId} availableLetters={letters} onBoardChange={handleBoardChange} />
           </TabsContent>
 
           <TabsContent value="strategy" className="space-y-6">
