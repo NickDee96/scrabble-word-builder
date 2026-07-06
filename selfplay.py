@@ -71,8 +71,12 @@ def _counter_to_rack(counter: Counter) -> str:
 
 
 # --- Game lifecycle --------------------------------------------------------
-def new_game(seed: Optional[int] = None) -> dict:
-    """Deal a fresh game: empty board, two random racks, the rest in the bag."""
+def new_game(seed: Optional[int] = None, first: str = "A") -> dict:
+    """Deal a fresh game: empty board, two random racks, the rest in the bag.
+
+    ``first`` is the side to move first ("A" or "B"); alternating it across a match keeps
+    the first-move advantage balanced.
+    """
     rng = random.Random(seed)
     bag: List[str] = []
     for tile, n in TILE_DISTRIBUTION.items():
@@ -86,7 +90,7 @@ def new_game(seed: Optional[int] = None) -> dict:
         "racks": {"A": rack_a, "B": rack_b},
         "bag": "".join(rest),
         "scores": {"A": 0, "B": 0},
-        "turn": "A",
+        "turn": first if first in ("A", "B") else "A",
         "passes": 0,
         "moveNumber": 0,
         "over": False,
@@ -117,6 +121,8 @@ def _best_move(letters: Grid, blanks: BoolGrid, rack: str, agent: str,
     moves = generate_moves(letters, blanks, rack)
     if not moves:
         return None, {}
+    if agent == "score":
+        return max(moves, key=lambda m: (m.score, m.equity)), {}
     return max(moves, key=lambda m: (m.equity, m.score)), {}
 
 
@@ -202,3 +208,50 @@ def play_turn(
     if not state["over"]:
         state["turn"] = opp
     return state, move
+
+
+def play_game(
+    agent_a: str,
+    agent_b: str,
+    *,
+    time_budget_ms: int = 2000,
+    max_candidates: int = 8,
+    seed: Optional[int] = None,
+    first: str = "A",
+    max_turns: int = 80,
+) -> dict:
+    """Play a whole game between two agents and return a compact result summary.
+
+    ``first`` chooses which side opens (alternate it across a match for fairness). If
+    ``seed`` is given the entire game is reproducible; otherwise draws and simulations are
+    random. ``max_turns`` is a safety cap; an unfinished game is settled by rack penalties.
+    """
+    base = random.Random(seed) if seed is not None else None
+    state = new_game(
+        seed=(base.randrange(1 << 30) if base is not None else None),
+        first=first if first in ("A", "B") else "A",
+    )
+    turns = 0
+    while not state["over"] and turns < max_turns:
+        agent = agent_a if state["turn"] == "A" else agent_b
+        turn_seed = base.randrange(1 << 30) if base is not None else None
+        state, _ = play_turn(
+            state,
+            agent,
+            time_budget_ms=time_budget_ms,
+            max_candidates=max_candidates,
+            seed=turn_seed,
+        )
+        turns += 1
+    if not state["over"]:  # hit the turn cap -> settle by rack penalties
+        for p in ("A", "B"):
+            state["scores"][p] -= _rack_value(state["racks"][p])
+        _finish(state)
+    return {
+        "scores": state["scores"],
+        "winner": state["winner"],
+        "turns": turns,
+        "first": first,
+        "bagLeft": len(state["bag"]),
+    }
+

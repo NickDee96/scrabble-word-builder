@@ -202,3 +202,34 @@ def test_selfplay_step_rejects_bad_turn():
     assert response.status_code == 422
 
 
+def test_selfplay_step_accepts_score_agent():
+    new = client.post("/api/selfplay/new", json={"seed": 8}).json()
+    response = client.post(
+        "/api/selfplay/step",
+        json={"state": new, "agents": {"A": "score", "B": "score"}},
+    )
+    assert response.status_code == 200
+    assert response.json()["move"]["player"] == "A"
+
+
+def test_selfplay_game_returns_result():
+    response = client.post(
+        "/api/selfplay/game",
+        json={"agents": {"A": "score", "B": "equity"}, "first": "A", "seed": 5},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["winner"] in ("A", "B", "tie")
+    assert body["turns"] > 0
+    assert set(body["scores"]) == {"A", "B"}
+
+
+def test_selfplay_game_rejects_bad_agent():
+    response = client.post(
+        "/api/selfplay/game",
+        json={"agents": {"A": "wizard", "B": "equity"}},
+    )
+    assert response.status_code == 422
+
+
+

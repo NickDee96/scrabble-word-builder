@@ -13,7 +13,7 @@ from typing import Optional
 from scrabble_engine import scrabble_word_builder, word_count
 from board_engine import generate_moves, BOARD_SIZE
 from simulation import simulate
-from selfplay import new_game, play_turn, RACK_SIZE
+from selfplay import new_game, play_turn, play_game, RACK_SIZE
 
 # --- Configuration (environment-driven) ------------------------------------
 _DEFAULT_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000"
@@ -158,6 +158,14 @@ class StepRequest(BaseModel):
     agents: SelfPlayAgents = SelfPlayAgents()
     timeBudgetMs: int = 2000
     maxCandidates: int = 8
+
+
+class GameRequest(BaseModel):
+    agents: SelfPlayAgents = SelfPlayAgents()
+    timeBudgetMs: int = 2000
+    maxCandidates: int = 8
+    first: str = "A"
+    seed: Optional[int] = None
 
 
 def _validate_rack(letters: str, board_letters: str) -> None:
@@ -353,8 +361,8 @@ async def api_selfplay_step(request: Request, data: StepRequest):
         return {"state": state, "move": {"type": "none", "player": turn, "agent": ""}}
 
     agent = data.agents.A if turn == "A" else data.agents.B
-    if agent not in ("equity", "simulation"):
-        raise HTTPException(status_code=422, detail="agent must be 'equity' or 'simulation'")
+    if agent not in ("equity", "score", "simulation"):
+        raise HTTPException(status_code=422, detail="agent must be 'equity', 'score', or 'simulation'")
 
     time_budget = max(300, min(int(data.timeBudgetMs), MAX_SIM_TIME_MS))
     max_cand = max(1, min(int(data.maxCandidates), MAX_SIM_CANDIDATES))
@@ -362,6 +370,28 @@ async def api_selfplay_step(request: Request, data: StepRequest):
         state, agent, time_budget_ms=time_budget, max_candidates=max_cand
     )
     return {"state": new_state, "move": move}
+
+
+@app.post("/api/selfplay/game")
+@limiter.limit(_selfplay_rate_limit)
+async def api_selfplay_game(request: Request, data: GameRequest):
+    """Play one full self-play game between the two agents and return the result summary."""
+    for who in ("A", "B"):
+        if getattr(data.agents, who) not in ("equity", "score", "simulation"):
+            raise HTTPException(
+                status_code=422, detail="agents must be 'equity', 'score', or 'simulation'"
+            )
+    first = data.first if data.first in ("A", "B") else "A"
+    time_budget = max(300, min(int(data.timeBudgetMs), MAX_SIM_TIME_MS))
+    max_cand = max(1, min(int(data.maxCandidates), MAX_SIM_CANDIDATES))
+    return play_game(
+        data.agents.A,
+        data.agents.B,
+        time_budget_ms=time_budget,
+        max_candidates=max_cand,
+        first=first,
+        seed=data.seed,
+    )
 
 
 @app.get("/api/health", response_model=HealthResponse)
