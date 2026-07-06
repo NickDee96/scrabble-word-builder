@@ -73,17 +73,17 @@ ordered by priority. Legend: 🔴 critical · 🟠 high · 🟡 medium · 🟢 n
 
 ## Phase 2 — Security & Robustness 🟠
 
-- [ ] **T2.1** 🔴 Fix CORS.
+- [x] **T2.1** 🔴 Fix CORS.
   - In [app.py](app.py), drop `allow_origins=["*"]` + `allow_credentials=True` combo.
     Use an explicit allowlist from env (`ALLOWED_ORIGINS`), credentials off unless needed.
 
-- [ ] **T2.2** 🔴 Bound inputs to prevent DoS.
+- [x] **T2.2** 🔴 Bound inputs to prevent DoS.
   - Reject racks longer than a configurable max (e.g. 10 letters, ≤ 2 blanks) with HTTP
     422 and a clear message, in the `/api/find-words` handler.
 
-- [ ] **T2.3** 🟠 Add lightweight rate limiting (e.g. `slowapi`) to the API.
+- [x] **T2.3** 🟠 Add lightweight rate limiting (e.g. `slowapi`) to the API.
 
-- [ ] **T2.4** 🟠 Real frontend error & empty states.
+- [x] **T2.4** 🟠 Real frontend error & empty states.
   - Surface API/network errors to the user (toast/alert) instead of only `console.error`
     in [frontend/app/page.tsx](frontend/app/page.tsx); show a friendly "no words found".
   - Make [frontend/app/loading.tsx](frontend/app/loading.tsx) render an actual skeleton.
@@ -92,7 +92,7 @@ ordered by priority. Legend: 🔴 critical · 🟠 high · 🟡 medium · 🟢 n
 
 ## Phase 3 — Testing & CI 🟠
 
-- [ ] **T3.1** 🟠 Backend tests: engine + API (`pytest`, `httpx`/`TestClient`).
+- [x] **T3.1** 🟠 Backend tests: engine + API (`pytest`, `httpx`/`TestClient`).
 - [ ] **T3.2** 🟡 Frontend smoke test (`vitest`/RTL or a Playwright happy-path).
 - [ ] **T3.3** 🟠 GitHub Actions CI: lint + type-check + tests + `docker build` on PR.
 - [ ] **T3.4** 🟡 Add `.env.example` and a "Configuration" section documenting every var.
@@ -143,7 +143,7 @@ rewrite) guarded by those tests.
 |-------|-------|----------|--------|
 | 0 | Truth & Hygiene | 🔴 | ✅ Done |
 | 1 | Core Engine & Correctness | 🔴 | ✅ Done |
-| 2 | Security & Robustness | 🟠 | ☐ Not started |
-| 3 | Testing & CI | 🟠 | ☐ Not started |
+| 2 | Security & Robustness | 🟠 | ✅ Done |
+| 3 | Testing & CI | 🟠 | 🚧 In progress |
 | 4 | Creative Features | 🟢 | ☐ Not started |
 | 5 | Polish & Delight | 🟢 | ☐ Not started |
