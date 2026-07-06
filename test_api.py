@@ -144,3 +144,30 @@ def test_analyze_score_mode_sorted_by_score():
     )
     scores = [p["score"] for p in response.json()["plays"]]
     assert scores == sorted(scores, reverse=True)
+
+
+def test_analyze_simulation_mode_returns_win_pct():
+    board = _empty_board()
+    board[7][7] = {"letter": "S", "blank": False}
+    board[7][8] = {"letter": "O", "blank": False}
+    response = client.post(
+        "/api/analyze",
+        json={
+            "board": board,
+            "rack": "AT",
+            "mode": "simulation",
+            "timeBudgetMs": 2000,
+            "maxCandidates": 3,
+        },
+    )
+    assert response.status_code == 200
+    plays = response.json()["plays"]
+    assert plays
+    for p in plays:
+        assert 0.0 <= p["winPct"] <= 1.0
+        assert p["iterations"] >= 1
+        assert p["stdErr"] >= 0.0
+    # Simulation ranks by win probability.
+    win = [p["winPct"] for p in plays]
+    assert win == sorted(win, reverse=True)
+

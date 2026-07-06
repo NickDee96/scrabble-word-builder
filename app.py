@@ -12,6 +12,7 @@ from typing import Optional
 
 from scrabble_engine import scrabble_word_builder, word_count
 from board_engine import generate_moves, BOARD_SIZE
+from simulation import simulate
 
 # --- Configuration (environment-driven) ------------------------------------
 _DEFAULT_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000"
@@ -26,6 +27,9 @@ ALLOWED_ORIGINS = [
 MAX_RACK_TILES = int(os.getenv("MAX_RACK_TILES", "10"))
 MAX_BLANKS = int(os.getenv("MAX_BLANKS", "2"))
 MAX_BOARD_LETTERS = int(os.getenv("MAX_BOARD_LETTERS", "15"))
+# Simulation is far heavier than static ranking, so its cost is bounded here.
+MAX_SIM_TIME_MS = int(os.getenv("MAX_SIM_TIME_MS", "12000"))
+MAX_SIM_CANDIDATES = int(os.getenv("MAX_SIM_CANDIDATES", "12"))
 BLANK_CHARS = {" ", "?"}
 
 
@@ -97,6 +101,10 @@ class AnalyzeRequest(BaseModel):
     rack: str
     maxResults: int = 15
     mode: str = "equity"
+    # Simulation-only options (ignored by the score/equity modes).
+    timeBudgetMs: int = 4000
+    maxCandidates: int = 8
+    scoreMargin: float = 0.0
 
 
 class PlacedTileOut(BaseModel):
@@ -117,6 +125,11 @@ class PlayOut(BaseModel):
     leaveValue: float
     tiles: list[PlacedTileOut]
     crossWords: list[str]
+    # Populated only in simulation mode.
+    winPct: Optional[float] = None
+    simEquity: Optional[float] = None
+    iterations: Optional[int] = None
+    stdErr: Optional[float] = None
 
 
 class AnalyzeResponse(BaseModel):
@@ -208,9 +221,48 @@ async def api_analyze(request: Request, data: AnalyzeRequest):
             letters[r][c] = value
             blanks[r][c] = cell.blank
 
-    moves = generate_moves(letters, blanks, rack)
     limit = max(1, min(data.maxResults, 50))
-    mode = data.mode if data.mode in ("equity", "score") else "equity"
+    mode = data.mode if data.mode in ("equity", "score", "simulation") else "equity"
+
+    if mode == "simulation":
+        time_budget = max(500, min(int(data.timeBudgetMs), MAX_SIM_TIME_MS))
+        max_cand = max(1, min(int(data.maxCandidates), MAX_SIM_CANDIDATES))
+        margin = max(-500.0, min(float(data.scoreMargin), 500.0))
+        sim = simulate(
+            letters,
+            blanks,
+            rack,
+            max_candidates=max_cand,
+            time_budget_ms=time_budget,
+            score_margin=margin,
+        )
+        plays = [
+            PlayOut(
+                word=r.move.word,
+                row=r.move.row,
+                col=r.move.col,
+                direction=r.move.direction,
+                score=r.move.score,
+                leave=r.move.leave,
+                equity=round(r.move.equity, 1),
+                leaveValue=round(r.move.leave_value, 1),
+                tiles=[
+                    PlacedTileOut(row=t.row, col=t.col, letter=t.letter, blank=t.is_blank)
+                    for t in r.move.tiles
+                ],
+                crossWords=r.move.cross_words,
+                winPct=round(r.win_pct, 3),
+                simEquity=round(r.equity, 1),
+                iterations=r.rollouts,
+                stdErr=round(r.std_err, 1),
+            )
+            for r in sim[:limit]
+        ]
+        return AnalyzeResponse(
+            plays=plays, total=len(sim), message=f"Simulated {len(sim)} candidate plays"
+        )
+
+    moves = generate_moves(letters, blanks, rack)
     if mode == "equity":
         moves.sort(key=lambda m: (-m.equity, m.word))
     else:

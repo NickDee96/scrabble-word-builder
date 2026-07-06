@@ -67,20 +67,48 @@ def _word_multiplier(row: int, col: int) -> int:
     return 1
 
 
-# --- Lazy prefix set (for the trie-like recursion) -------------------------
-_PREFIXES: Optional[Set[str]] = None
+# --- Lazy DAWG/trie (drives the move-generation recursion) -----------------
+class _TrieNode:
+    __slots__ = ("children", "is_word")
+
+    def __init__(self) -> None:
+        self.children: Dict[str, "_TrieNode"] = {}
+        self.is_word = False
 
 
-def _prefixes() -> Set[str]:
-    """Set of every prefix of every dictionary word (built once, on first use)."""
-    global _PREFIXES
-    if _PREFIXES is None:
-        prefixes: Set[str] = set()
+_TRIE: Optional["_TrieNode"] = None
+
+
+def _trie() -> "_TrieNode":
+    """Trie of the whole dictionary (built once, on first use).
+
+    Walking child pointers lets the generator branch only into letters that actually
+    continue a word - far cheaper than testing every rack letter against a giant prefix
+    set, especially for blanks (which would otherwise fan out to all 26 letters).
+    """
+    global _TRIE
+    if _TRIE is None:
+        root = _TrieNode()
         for word in WORDS:
-            for i in range(len(word) + 1):
-                prefixes.add(word[:i])
-        _PREFIXES = prefixes
-    return _PREFIXES
+            node = root
+            for ch in word:
+                child = node.children.get(ch)
+                if child is None:
+                    child = _TrieNode()
+                    node.children[ch] = child
+                node = child
+            node.is_word = True
+        _TRIE = root
+    return _TRIE
+
+
+def _walk(node: "_TrieNode", s: str) -> Optional["_TrieNode"]:
+    """Descend from ``node`` following the letters of ``s``; ``None`` if no such path."""
+    for ch in s:
+        node = node.children.get(ch)  # type: ignore[assignment]
+        if node is None:
+            return None
+    return node
 
 
 Grid = List[List[Optional[str]]]
@@ -166,7 +194,7 @@ def _generate_horizontal(
     letters: Grid, blanks: BoolGrid, rack: str, direction: str, moves: List[Move]
 ) -> None:
     board_empty = all(letters[r][c] is None for r in range(BOARD_SIZE) for c in range(BOARD_SIZE))
-    prefixes = _prefixes()
+    root = _trie()
 
     for row in range(BOARD_SIZE):
         # Anchor squares: empty squares adjacent to a tile (or the centre on an empty board).
@@ -213,17 +241,22 @@ def _generate_horizontal(
             )
 
         def extend_right(
-            col: int, prefix: str, rack_counter: Counter, placed: List[PlacedTile], anchor_col: int
+            col: int,
+            node: "_TrieNode",
+            prefix: str,
+            rack_counter: Counter,
+            placed: List[PlacedTile],
+            anchor_col: int,
         ) -> None:
             if col < BOARD_SIZE and letters[row][col] is not None:
                 existing = letters[row][col]  # type: ignore[assignment]
-                nxt = prefix + existing
-                if nxt in prefixes:
-                    extend_right(col + 1, nxt, rack_counter, placed, anchor_col)
+                child = node.children.get(existing)
+                if child is not None:
+                    extend_right(col + 1, child, prefix + existing, rack_counter, placed, anchor_col)
                 return
 
             # (row, col) is empty or off-board: we may terminate here.
-            if placed and col > anchor_col and prefix in WORDS:
+            if placed and col > anchor_col and node.is_word:
                 start_col = col - len(prefix)
                 record(start_col, col - 1, prefix, placed)
 
@@ -231,29 +264,42 @@ def _generate_horizontal(
                 return
 
             allowed, _cs = cross(col)
-            for tile_letter in list(rack_counter):
-                if rack_counter[tile_letter] == 0:
+            have_blank = rack_counter.get(BLANK, 0) > 0
+            for played, child in node.children.items():
+                if allowed is not None and played not in allowed:
                     continue
-                candidates = ALPHABET if tile_letter == BLANK else [tile_letter]
-                for played in candidates:
-                    if allowed is not None and played not in allowed:
-                        continue
-                    if (prefix + played) not in prefixes:
-                        continue
-                    rack_counter[tile_letter] -= 1
+                if rack_counter.get(played, 0) > 0:
+                    rack_counter[played] -= 1
                     extend_right(
                         col + 1,
+                        child,
                         prefix + played,
                         rack_counter,
-                        placed + [PlacedTile(row, col, played, tile_letter == BLANK)],
+                        placed + [PlacedTile(row, col, played, False)],
                         anchor_col,
                     )
-                    rack_counter[tile_letter] += 1
+                    rack_counter[played] += 1
+                if have_blank:
+                    rack_counter[BLANK] -= 1
+                    extend_right(
+                        col + 1,
+                        child,
+                        prefix + played,
+                        rack_counter,
+                        placed + [PlacedTile(row, col, played, True)],
+                        anchor_col,
+                    )
+                    rack_counter[BLANK] += 1
 
         def left_part(
-            prefix: str, anchor_col: int, rack_counter: Counter, limit: int, placed: List[PlacedTile]
+            node: "_TrieNode",
+            prefix: str,
+            anchor_col: int,
+            rack_counter: Counter,
+            limit: int,
+            placed: List[PlacedTile],
         ) -> None:
-            extend_right(anchor_col, prefix, rack_counter, placed, anchor_col)
+            extend_right(anchor_col, node, prefix, rack_counter, placed, anchor_col)
             if limit <= 0:
                 return
             left_col = anchor_col - len(prefix) - 1
@@ -264,10 +310,15 @@ def _generate_horizontal(
                     continue
                 candidates = ALPHABET if tile_letter == BLANK else [tile_letter]
                 for played in candidates:
-                    if (played + prefix) not in prefixes:
+                    child = root.children.get(played)
+                    if child is None:
+                        continue
+                    sub = _walk(child, prefix)
+                    if sub is None:
                         continue
                     rack_counter[tile_letter] -= 1
                     left_part(
+                        sub,
                         played + prefix,
                         anchor_col,
                         rack_counter,
@@ -283,14 +334,16 @@ def _generate_horizontal(
                 while left > 0 and letters[row][left - 1] is not None:
                     left -= 1
                 prefix = "".join(letters[row][left:anchor_col])  # type: ignore[misc]
-                extend_right(anchor_col, prefix, rack_counter, [], anchor_col)
+                node = _walk(root, prefix)
+                if node is not None:
+                    extend_right(anchor_col, node, prefix, rack_counter, [], anchor_col)
             else:
                 limit = 0
                 c = anchor_col - 1
                 while c >= 0 and letters[row][c] is None and c not in anchors:
                     limit += 1
                     c -= 1
-                left_part("", anchor_col, rack_counter, limit, [])
+                left_part(root, "", anchor_col, rack_counter, limit, [])
 
 
 def _orient(tile: PlacedTile, direction: str) -> PlacedTile:
