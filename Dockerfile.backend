@@ -15,20 +15,20 @@ RUN apt-get update && apt-get install -y curl && \
 # Copy application files
 COPY app.py .
 COPY scrabble.py .
+COPY scrabble_engine.py .
 COPY ["Collins Scrabble Words (2019).txt", "."]
+COPY templates/ ./templates/
 
 # Expose port 5000
 EXPOSE 5000
 
-# Set environment variables
-ENV FLASK_APP=app.py
-ENV FLASK_ENV=production
-ENV FLASK_RUN_HOST=0.0.0.0
-ENV FLASK_RUN_PORT=5000
+# Set environment variables for FastAPI
+ENV PYTHONPATH=/app
+ENV PORT=5000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
   CMD curl -f http://localhost:5000/api/health || exit 1
 
-# Run the application
-CMD ["python", "-m", "flask", "run", "--host=0.0.0.0", "--port=5000"]
+# Run the FastAPI application with Uvicorn
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5000"]

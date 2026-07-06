@@ -43,8 +43,8 @@ if not exist "frontend\package.json" (
 echo ✓ Required files found
 echo.
 
-echo Starting Flask backend on port 5000...
-start "Scrabble Backend" cmd /k "cd /d "%~dp0" && echo Starting Flask Backend... && python app.py"
+echo Starting FastAPI backend on port 5000...
+start "Scrabble Backend" cmd /k "cd /d "%~dp0" && echo Starting FastAPI Backend... && python app.py"
 
 echo.
 echo Waiting 5 seconds for backend to start...

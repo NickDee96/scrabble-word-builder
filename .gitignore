@@ -163,6 +163,9 @@ parts/
 sdist/
 var/
 wheels/
+
+# The Next.js frontend keeps TypeScript source under frontend/lib (not a Python build dir).
+!frontend/lib/
 share/python-wheels/
 *.egg-info/
 .installed.cfg

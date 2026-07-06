@@ -115,16 +115,13 @@ chmod +x docker-helper.sh
 - Enables hot reloading for both frontend and backend
 - Mounts source code as volumes for live editing
 - Sets development environment variables
-- Enables Flask debug mode
+- Enables Uvicorn auto-reload
 
 ## Environment Variables
 
-### Backend (Flask)
-- `FLASK_ENV`: Environment mode (development/production)
-- `FLASK_DEBUG`: Enable Flask debug mode (1/0)
-- `FLASK_APP`: Main application file (app.py)
-- `FLASK_RUN_HOST`: Host to bind to (0.0.0.0 for Docker)
-- `FLASK_RUN_PORT`: Port to listen on (5000)
+### Backend (FastAPI / Uvicorn)
+- `ENVIRONMENT`: Environment mode (development/production)
+- `PORT`: Port Uvicorn listens on (5000)
 
 ### Frontend (Next.js)
 - `NODE_ENV`: Environment mode (development/production)

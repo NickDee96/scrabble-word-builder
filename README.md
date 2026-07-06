@@ -1,11 +1,11 @@
 # Scrabble Word Builder
 
-A full-stack web application that generates all possible words from given letters, designed as a solver for Scrabble and other word games. Features a modern React frontend with Flask backend integration.
+A full-stack web application that generates all possible words from given letters, designed as a solver for Scrabble and other word games. Features a modern React frontend with a FastAPI backend.
 
 ## 🎯 Features
 
 - **Modern Web Interface**: Beautiful, responsive React/Next.js frontend
-- **Fast Word Generation**: Efficient Flask backend with comprehensive word database
+- **Fast Word Generation**: Efficient FastAPI backend with comprehensive word database
 - **Interactive Scrabble Board**: Visual board interface for strategic planning
 - **Advanced Filtering**: Filter by word length, score, and patterns
 - **Real-time Results**: Instant word generation as you type
@@ -14,12 +14,12 @@ A full-stack web application that generates all possible words from given letter
 ## 🏗️ Architecture
 
 ```
-Frontend (Next.js/React)  ←→  Backend (Flask/Python)
+Frontend (Next.js/React)  ←→  Backend (FastAPI/Python)
      Port 3000                    Port 5000
      
 ┌─────────────────┐         ┌─────────────────┐
 │  Modern UI      │   HTTP  │  Word Engine    │
-│  - React/Next   │  ←────→ │  - Flask API    │
+│  - React/Next   │  ←────→ │  - FastAPI API  │
 │  - Tailwind CSS │   API   │  - Word DB      │
 │  - TypeScript   │         │  - Algorithms   │
 └─────────────────┘         └─────────────────┘
@@ -29,7 +29,7 @@ Frontend (Next.js/React)  ←→  Backend (Flask/Python)
 
 ```
 scrabble/
-├── app.py                          # Flask backend server
+├── app.py                          # FastAPI backend server
 ├── scrabble.py                     # Command-line version
 ├── ui.py                          # Tkinter GUI (legacy)
 ├── start-services.bat             # Easy startup script
@@ -77,7 +77,7 @@ For detailed Docker setup instructions, see [DOCKER_SETUP.md](DOCKER_SETUP.md).
 ### Option 2: Manual Setup
 
 ### Prerequisites
-- Python 3.7+ with pip
+- Python 3.9+ with pip
 - Node.js 16+ with npm
 - Windows (for the batch script, or adapt for other OS)
 
@@ -89,12 +89,12 @@ For detailed Docker setup instructions, see [DOCKER_SETUP.md](DOCKER_SETUP.md).
 
 ### Option 2: Manual Setup
 
-#### 1. Setup Backend (Flask)
+#### 1. Setup Backend (FastAPI)
 ```bash
 # Install Python dependencies
 pip install -r requirements.txt
 
-# Start Flask server
+# Start FastAPI server (Uvicorn)
 python app.py
 ```
 The backend will run on http://localhost:5000
@@ -115,9 +115,34 @@ The frontend will run on http://localhost:3000
 #### 3. Test Integration
 Open `test-connection.html` in a browser to verify both services are running correctly.
 
+## ⚙️ Configuration
+
+All configuration is environment-driven; every value has a sensible default, so the app
+runs with no setup. See [`.env.example`](.env.example) for a copy-paste template.
+
+### Backend (FastAPI)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENVIRONMENT` | `development` | Environment label (informational) |
+| `PORT` | `5000` | Port Uvicorn listens on |
+| `ALLOWED_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | Comma-separated CORS allowlist |
+| `MAX_RACK_TILES` | `10` | Max tiles (letters + blanks) per request |
+| `MAX_BLANKS` | `2` | Max blank tiles per request |
+| `MAX_BOARD_LETTERS` | `15` | Max board letters per request |
+| `RATE_LIMIT_FIND_WORDS` | `30/minute` | Rate limit for `/api/find-words` |
+
+### Frontend (Next.js)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NEXT_PUBLIC_API_URL` | `http://localhost:5000` | Backend base URL the Next.js server proxies `/api/*` to |
+
+Set the frontend value in `frontend/.env.local`.
+
 ## 🔧 API Endpoints
 
-### Backend API (Flask - Port 5000)
+### Backend API (FastAPI - Port 5000)
 
 #### `POST /api/find-words`
 Find all possible words from given letters.
@@ -201,20 +226,23 @@ The frontend and backend communicate via HTTP REST API:
 
 ## 🧠 Algorithm
 
-The core algorithm uses itertools.permutations to generate all possible letter combinations and validates them against the Collins Scrabble Words database:
+The core engine (`scrabble_engine.py`) uses an **anagram signature index** for fast
+lookups. At startup, every dictionary word is grouped by its *signature* — the sorted
+tuple of its letters (e.g. `WREATHS` and `THAWERS` share `AEHRSTW`). Finding words then
+works as follows:
 
-1. Generate all permutations of input letters (1 to N length)
-2. For each permutation, try inserting board letters at all positions
-3. Check if resulting word exists in word database
-4. Calculate Scrabble score for valid words
-5. Sort results by score and length
+1. Enumerate the distinct letter multisets reachable from the rack, expanding blank
+   tiles (`?` or space) into wildcards.
+2. Look up each multiset's signature in the index in O(1).
+3. Keep words where any board letters appear as a contiguous block.
+4. Score each word (blank tiles score 0) and return the best score per word, sorted.
 
-**Time Complexity:** O(n!) where n is the number of input letters
-**Space Complexity:** O(n!) for storing all possible words
+This replaces the previous O(n!) permutation scan, returning results for a full
+7-letter rack in a few milliseconds.
 
 ## 🎯 Future Enhancements
 
-- **Performance Optimization**: Implement Trie data structure for faster word lookup
+- **Performance Optimization**: ✅ Anagram signature index implemented (`scrabble_engine.py`)
 - **Advanced Features**: 
   - Premium square multipliers
   - Word validation against game rules

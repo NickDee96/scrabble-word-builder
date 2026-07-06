@@ -7,15 +7,11 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import { Search, Shuffle, Trophy, Zap, BookOpen, Target, Grid3X3 } from "lucide-react"
+import { Search, Shuffle, Trophy, Zap, BookOpen, Target, Grid3X3, AlertCircle, SearchX } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import ScrabbleBoard from "@/components/scrabble-board"
-
-interface WordResult {
-  word: string
-  score: number
-  length: number
-}
+import { getScoreColor, groupResultsByLength, type WordResult } from "@/lib/scoring"
 
 export default function ScrabbleWordBuilder() {
   const [letters, setLetters] = useState("WERTASH")
@@ -23,13 +19,18 @@ export default function ScrabbleWordBuilder() {
   const [results, setResults] = useState<WordResult[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [activeTab, setActiveTab] = useState("builder")
+  const [error, setError] = useState<string | null>(null)
+  const [hasSearched, setHasSearched] = useState(false)
 
-  // Function to find words by calling the Flask API
+  // Function to find words by calling the backend API. The request uses a
+  // same-origin relative URL that Next.js rewrites proxy to the backend, so the
+  // same build works locally and in Docker without hardcoded hosts or CORS.
   const findWords = async () => {
     setIsLoading(true)
+    setError(null)
 
     try {
-      const response = await fetch('http://localhost:5000/api/find-words', {
+      const response = await fetch('/api/find-words', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -41,50 +42,46 @@ export default function ScrabbleWordBuilder() {
       })
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
+        let detail = `Request failed (status ${response.status}).`
+        if (response.status === 429) {
+          detail = "You're searching too fast — please wait a moment and try again."
+        } else {
+          try {
+            const body = await response.json()
+            if (typeof body?.detail === "string") detail = body.detail
+          } catch {
+            /* ignore non-JSON error bodies */
+          }
+        }
+        setResults([])
+        setError(detail)
+        return
       }
 
       const data = await response.json()
-      
-      if (data.success) {
-        setResults(data.results)
-      } else {
-        console.error('API error:', data.error)
-        // Fallback to empty results
-        setResults([])
+      setResults(data.success ? data.results : [])
+      if (!data.success) {
+        setError("Something went wrong finding words. Please try again.")
       }
-    } catch (error) {
-      console.error('Error finding words:', error)
-      // Fallback to empty results on error
+    } catch (err) {
+      console.error('Error finding words:', err)
       setResults([])
+      setError("Could not reach the server. Check your connection and try again.")
+    } finally {
+      setHasSearched(true)
+      setIsLoading(false)
     }
-
-    setIsLoading(false)
   }
 
   const clearForm = () => {
     setLetters("")
     setBoardLetters("")
     setResults([])
+    setError(null)
+    setHasSearched(false)
   }
 
-  const groupedResults = results.reduce(
-    (acc, result) => {
-      if (!acc[result.length]) {
-        acc[result.length] = []
-      }
-      acc[result.length].push(result)
-      return acc
-    },
-    {} as Record<number, WordResult[]>,
-  )
-
-  const getScoreColor = (score: number) => {
-    if (score >= 15) return "bg-red-500"
-    if (score >= 10) return "bg-orange-500"
-    if (score >= 7) return "bg-yellow-500"
-    return "bg-green-500"
-  }
+  const groupedResults = groupResultsByLength(results)
 
   const handleBoardChange = (board: any) => {
     // Extract placed letters from board for analysis
@@ -208,6 +205,28 @@ export default function ScrabbleWordBuilder() {
                 </div>
               </CardContent>
             </Card>
+
+            {error && (
+              <Alert variant="destructive" className="bg-white/70 backdrop-blur-sm">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>Couldn't find words</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+
+            {hasSearched && !isLoading && !error && results.length === 0 && (
+              <Card className="shadow-lg border-0 bg-white/70 backdrop-blur-sm">
+                <CardContent className="flex flex-col items-center justify-center py-12 text-center space-y-3">
+                  <SearchX className="w-10 h-10 text-muted-foreground" />
+                  <div>
+                    <p className="font-semibold">No words found</p>
+                    <p className="text-sm text-muted-foreground">
+                      Try different letters, or add board letters to build around.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Results Section */}
             {results.length > 0 && (
