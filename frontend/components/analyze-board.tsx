@@ -16,7 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
-import { Sparkles, Trash2, AlertCircle, Trophy, Copy, ClipboardPaste } from "lucide-react"
+import { Sparkles, Trash2, AlertCircle, Trophy, Copy, ClipboardPaste, Undo2, Redo2, Flag } from "lucide-react"
 import {
   BOARD_SIZE,
   boardToText,
@@ -27,6 +27,7 @@ import {
   premiumLabel,
   premiumType,
   type BoardCell,
+  type GameMove,
   type Play,
 } from "@/lib/board"
 
@@ -37,6 +38,14 @@ interface AnalyzeBoardProps {
   onRackChange: (rack: string) => void
   plays: Play[]
   onPlaysChange: (plays: Play[]) => void
+  moveLog: GameMove[]
+  onMoveLogChange: (moveLog: GameMove[]) => void
+}
+
+interface Snapshot {
+  board: (BoardCell | null)[][]
+  rack: string
+  moveLog: GameMove[]
 }
 
 export default function AnalyzeBoard({
@@ -46,6 +55,8 @@ export default function AnalyzeBoard({
   onRackChange,
   plays,
   onPlaysChange,
+  moveLog,
+  onMoveLogChange,
 }: AnalyzeBoardProps) {
   const [selected, setSelected] = useState<{ row: number; col: number } | null>(null)
   const [hover, setHover] = useState<Play | null>(null)
@@ -55,6 +66,9 @@ export default function AnalyzeBoard({
   const [pasteText, setPasteText] = useState("")
   const [copied, setCopied] = useState(false)
   const [mode, setMode] = useState<"equity" | "score">("equity")
+  const [undoStack, setUndoStack] = useState<Snapshot[]>([])
+  const [redoStack, setRedoStack] = useState<Snapshot[]>([])
+  const [reviewOpen, setReviewOpen] = useState(false)
   const gridRef = useRef<HTMLDivElement>(null)
 
   const ghost = useMemo(() => {
@@ -63,13 +77,56 @@ export default function AnalyzeBoard({
     return map
   }, [hover])
 
+  const apply = (next: Partial<Snapshot>) => {
+    setUndoStack((s) => [...s, { board, rack, moveLog }])
+    setRedoStack([])
+    if (next.board !== undefined) onBoardChange(next.board)
+    if (next.rack !== undefined) onRackChange(next.rack)
+    if (next.moveLog !== undefined) onMoveLogChange(next.moveLog)
+  }
+
+  const undo = () => {
+    if (undoStack.length === 0) return
+    const prev = undoStack[undoStack.length - 1]
+    setRedoStack((r) => [...r, { board, rack, moveLog }])
+    setUndoStack((s) => s.slice(0, -1))
+    onBoardChange(prev.board)
+    onRackChange(prev.rack)
+    onMoveLogChange(prev.moveLog)
+    onPlaysChange([])
+    setHover(null)
+  }
+
+  const redo = () => {
+    if (redoStack.length === 0) return
+    const nextState = redoStack[redoStack.length - 1]
+    setUndoStack((s) => [...s, { board, rack, moveLog }])
+    setRedoStack((r) => r.slice(0, -1))
+    onBoardChange(nextState.board)
+    onRackChange(nextState.rack)
+    onMoveLogChange(nextState.moveLog)
+    onPlaysChange([])
+    setHover(null)
+  }
+
   const setCell = (row: number, col: number, cell: BoardCell | null) => {
     const next = board.map((r) => r.slice())
     next[row][col] = cell
-    onBoardChange(next)
+    apply({ board: next })
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+      e.preventDefault()
+      if (e.shiftKey) redo()
+      else undo()
+      return
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+      e.preventDefault()
+      redo()
+      return
+    }
     if (!selected) return
     const { row, col } = selected
     if (/^[a-zA-Z]$/.test(e.key)) {
@@ -141,15 +198,28 @@ export default function AnalyzeBoard({
       const idx = rackArr.indexOf(t.blank ? "?" : t.letter)
       if (idx >= 0) rackArr.splice(idx, 1)
     }
-    onBoardChange(next)
-    onRackChange(rackArr.join(""))
+    const best = plays[0] ?? play
+    const playEquity = play.equity ?? play.score
+    const bestEquity = best.equity ?? best.score
+    const logged: GameMove = {
+      word: play.word,
+      position: `${cellLabel(play.row, play.col)} ${play.direction}`,
+      score: play.score,
+      equity: playEquity,
+      leave: play.leave,
+      bestWord: best.word,
+      bestScore: best.score,
+      bestEquity: bestEquity,
+      equityLost: Math.max(0, Number((bestEquity - playEquity).toFixed(1))),
+    }
+    apply({ board: next, rack: rackArr.join(""), moveLog: [...moveLog, logged] })
     onPlaysChange([])
     setHover(null)
     setSelected(null)
   }
 
   const clearBoard = () => {
-    onBoardChange(emptyBoard())
+    apply({ board: emptyBoard() })
     onPlaysChange([])
     setHover(null)
     setSelected(null)
@@ -171,7 +241,7 @@ export default function AnalyzeBoard({
   }
 
   const loadPasted = () => {
-    onBoardChange(parseBoardText(pasteText))
+    apply({ board: parseBoardText(pasteText) })
     onPlaysChange([])
     setHover(null)
     setSelected(null)
@@ -204,12 +274,115 @@ export default function AnalyzeBoard({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={reviewOpen} onOpenChange={setReviewOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Game review</DialogTitle>
+            <DialogDescription>
+              How each play you committed compared with the engine&apos;s best (by equity).
+            </DialogDescription>
+          </DialogHeader>
+          {moveLog.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-6 text-center">
+              No moves recorded yet. Click a suggested play to add it to the game, then review here.
+            </p>
+          ) : (
+            <>
+              <div className="flex flex-wrap gap-4 text-sm">
+                <span>
+                  <b>{moveLog.length}</b> plays
+                </span>
+                <span>
+                  Top play found{" "}
+                  <b>{moveLog.filter((m) => m.equityLost <= 0.05).length}</b>/{moveLog.length}
+                </span>
+                <span>
+                  Total equity lost{" "}
+                  <b>{moveLog.reduce((a, m) => a + m.equityLost, 0).toFixed(1)}</b>
+                </span>
+              </div>
+              <div className="max-h-[24rem] overflow-y-auto mt-2">
+                <table className="w-full text-sm">
+                  <thead className="text-xs text-muted-foreground">
+                    <tr className="text-left">
+                      <th className="py-1 pr-2 font-medium">#</th>
+                      <th className="py-1 pr-2 font-medium">You played</th>
+                      <th className="py-1 pr-2 font-medium">Best</th>
+                      <th className="py-1 text-right font-medium">Lost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {moveLog.map((m, i) => (
+                      <tr key={i} className="border-t">
+                        <td className="py-1 pr-2 text-muted-foreground">{i + 1}</td>
+                        <td className="py-1 pr-2">
+                          <span className="font-mono font-medium">{m.word}</span>{" "}
+                          <span className="text-xs text-muted-foreground">
+                            {m.position} · eq {m.equity.toFixed(1)}
+                          </span>
+                        </td>
+                        <td className="py-1 pr-2">
+                          <span className="font-mono">{m.bestWord}</span>{" "}
+                          <span className="text-xs text-muted-foreground">
+                            eq {m.bestEquity.toFixed(1)}
+                          </span>
+                        </td>
+                        <td
+                          className={`py-1 text-right tabular-nums ${
+                            m.equityLost > 0.05 ? "text-red-500" : "text-emerald-600"
+                          }`}
+                        >
+                          {m.equityLost > 0.05 ? `-${m.equityLost.toFixed(1)}` : "✓"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                onMoveLogChange([])
+                setReviewOpen(false)
+              }}
+              disabled={moveLog.length === 0}
+            >
+              Clear log
+            </Button>
+            <Button onClick={() => setReviewOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {/* Board editor */}
       <Card className="shadow-lg border-0 bg-white/70 backdrop-blur-sm">
         <CardHeader>
           <CardTitle className="flex items-center justify-between gap-2">
             <span>Board Position</span>
             <div className="flex items-center gap-1.5">
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+                onClick={undo}
+                disabled={undoStack.length === 0}
+                title="Undo (Ctrl+Z)"
+              >
+                <Undo2 className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+                onClick={redo}
+                disabled={redoStack.length === 0}
+                title="Redo (Ctrl+Shift+Z)"
+              >
+                <Redo2 className="w-4 h-4" />
+              </Button>
               <Button variant="outline" size="sm" onClick={handleCopy}>
                 <Copy className="w-4 h-4 mr-1" /> {copied ? "Copied!" : "Copy"}
               </Button>
@@ -269,6 +442,15 @@ export default function AnalyzeBoard({
               )}
             </div>
           </div>
+          <Button
+            variant="outline"
+            className="w-full mt-4"
+            onClick={() => setReviewOpen(true)}
+            disabled={moveLog.length === 0}
+          >
+            <Flag className="w-4 h-4 mr-2" /> End game &amp; review
+            {moveLog.length > 0 ? ` (${moveLog.length})` : ""}
+          </Button>
         </CardContent>
       </Card>
 
@@ -371,10 +553,12 @@ export default function AnalyzeBoard({
                         {play.leave ? `keep ${play.leave}` : "uses all"}
                       </span>
                       <span className="hidden sm:inline tabular-nums">
-                        {mode === "equity" ? `${play.score} pts` : `eq ${play.equity.toFixed(1)}`}
+                        {mode === "equity"
+                          ? `${play.score} pts`
+                          : `eq ${(play.equity ?? play.score).toFixed(1)}`}
                       </span>
                       <Badge className="bg-blue-600 text-white tabular-nums">
-                        {mode === "equity" ? play.equity.toFixed(1) : play.score}
+                        {mode === "equity" ? (play.equity ?? play.score).toFixed(1) : play.score}
                       </Badge>
                     </span>
                   </button>

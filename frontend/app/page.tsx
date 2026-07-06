@@ -12,7 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import AnalyzeBoard from "@/components/analyze-board"
 import { getScoreColor, groupResultsByLength, type WordResult } from "@/lib/scoring"
-import { emptyBoard, type BoardCell, type Play } from "@/lib/board"
+import { emptyBoard, type BoardCell, type GameMove, type Play } from "@/lib/board"
 import { useGameSessions } from "@/hooks/use-game-sessions"
 import SessionBar from "@/components/session-bar"
 
@@ -34,11 +34,13 @@ export default function ScrabbleWordBuilder() {
   const results = activeSession?.results ?? []
   const boardCells = activeSession?.boardCells ?? emptyBoard()
   const plays = activeSession?.plays ?? []
+  const moveLog = activeSession?.moveLog ?? []
   const setLetters = (value: string) => updateActive({ letters: value })
   const setBoardLetters = (value: string) => updateActive({ boardLetters: value })
   const setResults = (value: WordResult[]) => updateActive({ results: value })
   const setBoardCells = (value: (BoardCell | null)[][]) => updateActive({ boardCells: value })
   const setPlays = (value: Play[]) => updateActive({ plays: value })
+  const setMoveLog = (value: GameMove[]) => updateActive({ moveLog: value })
 
   const [isLoading, setIsLoading] = useState(false)
   const [activeTab, setActiveTab] = useState("builder")
@@ -312,6 +314,8 @@ export default function ScrabbleWordBuilder() {
               onRackChange={setLetters}
               plays={plays}
               onPlaysChange={setPlays}
+              moveLog={moveLog}
+              onMoveLogChange={setMoveLog}
             />
           </TabsContent>
 

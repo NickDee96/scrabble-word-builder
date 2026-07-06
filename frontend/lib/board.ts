@@ -27,6 +27,18 @@ export interface Play {
   crossWords: string[]
 }
 
+export interface GameMove {
+  word: string
+  position: string
+  score: number
+  equity: number
+  leave: string
+  bestWord: string
+  bestScore: number
+  bestEquity: number
+  equityLost: number
+}
+
 const TW = new Set(["0,0", "0,7", "0,14", "7,0", "7,14", "14,0", "14,7", "14,14"])
 const DW = new Set([
   "1,1", "2,2", "3,3", "4,4", "1,13", "2,12", "3,11", "4,10",

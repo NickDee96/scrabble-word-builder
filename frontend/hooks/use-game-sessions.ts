@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import type { WordResult } from "@/lib/scoring"
-import { emptyBoard, type BoardCell, type Play } from "@/lib/board"
+import { emptyBoard, type BoardCell, type GameMove, type Play } from "@/lib/board"
 
 export interface GameSession {
   id: string
@@ -12,6 +12,7 @@ export interface GameSession {
   results: WordResult[]
   boardCells: (BoardCell | null)[][]
   plays: Play[]
+  moveLog: GameMove[]
   createdAt: number
   updatedAt: number
 }
@@ -33,6 +34,7 @@ function createSession(name: string): GameSession {
     results: [],
     boardCells: emptyBoard(),
     plays: [],
+    moveLog: [],
     createdAt: now,
     updatedAt: now,
   }
