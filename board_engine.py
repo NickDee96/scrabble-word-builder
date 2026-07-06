@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
 from scrabble_engine import SCORES, WORDS
+from leaves import leave_value
 
 BOARD_SIZE = 15
 CENTER = (7, 7)
@@ -103,6 +104,8 @@ class Move:
     tiles: List[PlacedTile]
     score: int
     leave: str = ""
+    leave_value: float = 0.0
+    equity: float = 0.0
     cross_words: List[str] = field(default_factory=list)
 
     def key(self) -> Tuple:
@@ -376,6 +379,8 @@ def generate_moves(letters: Grid, blanks: BoolGrid, rack: str) -> List[Move]:
     result = list(best.values())
     for move in result:
         move.leave = _leave(rack, move.tiles)
+        move.leave_value = leave_value(move.leave)
+        move.equity = move.score + move.leave_value
     result.sort(key=lambda m: (-m.score, m.word))
     return result
 

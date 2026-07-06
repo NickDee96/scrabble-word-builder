@@ -124,3 +124,23 @@ def test_analyze_rejects_bad_board_shape():
 def test_analyze_requires_rack():
     response = client.post("/api/analyze", json={"board": _empty_board(), "rack": "  "})
     assert response.status_code == 400
+
+
+def test_analyze_equity_mode_returns_equity_sorted():
+    response = client.post(
+        "/api/analyze", json={"board": _empty_board(), "rack": "AESRTIN", "mode": "equity"}
+    )
+    assert response.status_code == 200
+    plays = response.json()["plays"]
+    assert plays
+    assert "equity" in plays[0] and "leaveValue" in plays[0]
+    equities = [p["equity"] for p in plays]
+    assert equities == sorted(equities, reverse=True)
+
+
+def test_analyze_score_mode_sorted_by_score():
+    response = client.post(
+        "/api/analyze", json={"board": _empty_board(), "rack": "AESRTIN", "mode": "score"}
+    )
+    scores = [p["score"] for p in response.json()["plays"]]
+    assert scores == sorted(scores, reverse=True)

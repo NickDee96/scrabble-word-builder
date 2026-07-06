@@ -96,6 +96,7 @@ class AnalyzeRequest(BaseModel):
     board: list[list[Optional[BoardCell]]]
     rack: str
     maxResults: int = 15
+    mode: str = "equity"
 
 
 class PlacedTileOut(BaseModel):
@@ -112,6 +113,8 @@ class PlayOut(BaseModel):
     direction: str
     score: int
     leave: str
+    equity: float
+    leaveValue: float
     tiles: list[PlacedTileOut]
     crossWords: list[str]
 
@@ -207,9 +210,14 @@ async def api_analyze(request: Request, data: AnalyzeRequest):
 
     moves = generate_moves(letters, blanks, rack)
     limit = max(1, min(data.maxResults, 50))
+    mode = data.mode if data.mode in ("equity", "score") else "equity"
+    if mode == "equity":
+        moves.sort(key=lambda m: (-m.equity, m.word))
+    else:
+        moves.sort(key=lambda m: (-m.score, m.word))
 
-    # Recommendation list: keep the best-scoring placement of each distinct word
-    # (moves are already sorted by descending score) so the same word does not repeat.
+    # Recommendation list: keep the best placement of each distinct word (moves are
+    # already sorted by the chosen metric) so the same word does not repeat.
     seen_words: set = set()
     unique = []
     for move in moves:
@@ -226,6 +234,8 @@ async def api_analyze(request: Request, data: AnalyzeRequest):
             direction=m.direction,
             score=m.score,
             leave=m.leave,
+            equity=round(m.equity, 1),
+            leaveValue=round(m.leave_value, 1),
             tiles=[
                 PlacedTileOut(row=t.row, col=t.col, letter=t.letter, blank=t.is_blank)
                 for t in m.tiles
