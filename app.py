@@ -11,6 +11,7 @@ from slowapi.util import get_remote_address
 from typing import Optional
 
 from scrabble_engine import scrabble_word_builder, word_count
+from board_engine import generate_moves, BOARD_SIZE
 
 # --- Configuration (environment-driven) ------------------------------------
 _DEFAULT_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000"
@@ -31,6 +32,11 @@ BLANK_CHARS = {" ", "?"}
 def _find_words_rate_limit() -> str:
     """Rate limit for the find-words endpoint (read per request so it can be tuned)."""
     return os.getenv("RATE_LIMIT_FIND_WORDS", "30/minute")
+
+
+def _analyze_rate_limit() -> str:
+    """Rate limit for the board-analysis endpoint (heavier than find-words)."""
+    return os.getenv("RATE_LIMIT_ANALYZE", "20/minute")
 
 
 app = FastAPI(
@@ -79,6 +85,41 @@ class HealthResponse(BaseModel):
     status: str
     message: str
     word_count: int
+
+
+class BoardCell(BaseModel):
+    letter: str
+    blank: bool = False
+
+
+class AnalyzeRequest(BaseModel):
+    board: list[list[Optional[BoardCell]]]
+    rack: str
+    maxResults: int = 15
+
+
+class PlacedTileOut(BaseModel):
+    row: int
+    col: int
+    letter: str
+    blank: bool
+
+
+class PlayOut(BaseModel):
+    word: str
+    row: int
+    col: int
+    direction: str
+    score: int
+    leave: str
+    tiles: list[PlacedTileOut]
+    crossWords: list[str]
+
+
+class AnalyzeResponse(BaseModel):
+    plays: list[PlayOut]
+    total: int
+    message: str
 
 
 def _validate_rack(letters: str, board_letters: str) -> None:
@@ -132,6 +173,57 @@ async def api_find_words(request: Request, request_data: FindWordsRequest):
         total_words=len(results),
         message=f"Found {len(results)} words",
     )
+
+
+@app.post("/api/analyze", response_model=AnalyzeResponse)
+@limiter.limit(_analyze_rate_limit)
+async def api_analyze(request: Request, data: AnalyzeRequest):
+    """Analyze a full board position and return the best legal plays for a rack."""
+    if len(data.board) != BOARD_SIZE or any(len(row) != BOARD_SIZE for row in data.board):
+        raise HTTPException(status_code=422, detail=f"Board must be {BOARD_SIZE}x{BOARD_SIZE}")
+
+    rack = data.rack.strip().upper()
+    if not rack:
+        raise HTTPException(status_code=400, detail="Rack is required")
+    if len(rack) > 7:
+        raise HTTPException(status_code=422, detail="Rack cannot exceed 7 tiles")
+    if not all(c.isalpha() or c in BLANK_CHARS for c in rack):
+        raise HTTPException(
+            status_code=400, detail="Rack must contain only letters or '?' for blanks"
+        )
+
+    letters = [[None] * BOARD_SIZE for _ in range(BOARD_SIZE)]
+    blanks = [[False] * BOARD_SIZE for _ in range(BOARD_SIZE)]
+    for r in range(BOARD_SIZE):
+        for c in range(BOARD_SIZE):
+            cell = data.board[r][c]
+            if cell is None:
+                continue
+            value = cell.letter.strip().upper()
+            if len(value) != 1 or not value.isalpha():
+                raise HTTPException(status_code=422, detail=f"Invalid board letter at ({r}, {c})")
+            letters[r][c] = value
+            blanks[r][c] = cell.blank
+
+    moves = generate_moves(letters, blanks, rack)
+    limit = max(1, min(data.maxResults, 50))
+    plays = [
+        PlayOut(
+            word=m.word,
+            row=m.row,
+            col=m.col,
+            direction=m.direction,
+            score=m.score,
+            leave=m.leave,
+            tiles=[
+                PlacedTileOut(row=t.row, col=t.col, letter=t.letter, blank=t.is_blank)
+                for t in m.tiles
+            ],
+            crossWords=m.cross_words,
+        )
+        for m in moves[:limit]
+    ]
+    return AnalyzeResponse(plays=plays, total=len(moves), message=f"Found {len(moves)} plays")
 
 
 @app.get("/api/health", response_model=HealthResponse)

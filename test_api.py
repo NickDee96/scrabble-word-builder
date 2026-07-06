@@ -98,3 +98,25 @@ def test_rate_limit_returns_429():
         else:
             os.environ["RATE_LIMIT_FIND_WORDS"] = original
     assert 429 in statuses
+
+
+def _empty_board():
+    return [[None] * 15 for _ in range(15)]
+
+
+def test_analyze_opening_play():
+    response = client.post("/api/analyze", json={"board": _empty_board(), "rack": "AT"})
+    assert response.status_code == 200
+    words = {p["word"]: p for p in response.json()["plays"]}
+    assert "AT" in words
+    assert words["AT"]["score"] == 4  # centre double-word square
+
+
+def test_analyze_rejects_bad_board_shape():
+    response = client.post("/api/analyze", json={"board": [[None] * 3], "rack": "AT"})
+    assert response.status_code == 422
+
+
+def test_analyze_requires_rack():
+    response = client.post("/api/analyze", json={"board": _empty_board(), "rack": "  "})
+    assert response.status_code == 400
