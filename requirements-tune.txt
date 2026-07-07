@@ -1,0 +1,5 @@
+# Optional dependency for the offline leave-weight tuner (tune_leaves.py).
+# Ax is Meta's adaptive-experimentation platform; it uses BoTorch (GP-based Bayesian
+# optimization) under the hood. Install with:  pip install -r requirements-tune.txt
+# The tuner falls back to random search when this is not installed.
+ax-platform>=0.4

@@ -24,6 +24,9 @@ _TILE_VALUE = {
 }
 
 _DUPLICATE_PENALTY = 2.0  # per extra copy of a letter
+_ALL_CONSONANT_PENALTY = 3.0  # leave of 2+ tiles with no vowel
+_ALL_VOWEL_PENALTY = 5.0  # leave of 2+ tiles with no consonant (worse)
+_Q_WITHOUT_U_PENALTY = 8.0  # holding Q with no U and no blank to unload it
 
 
 def leave_value(leave: str) -> float:
@@ -46,12 +49,41 @@ def leave_value(leave: str) -> float:
     vowels = sum(n for letter, n in counts.items() if letter in _VOWELS)
     if real >= 2:
         if vowels == 0:
-            value -= 3.0  # all consonants
+            value -= _ALL_CONSONANT_PENALTY
         elif vowels == real:
-            value -= 5.0  # all vowels (worse)
+            value -= _ALL_VOWEL_PENALTY
 
     # A Q with no way to unload it (no U and no blank) is a liability.
     if counts.get("Q", 0) and not counts.get("U", 0) and not counts.get(BLANK, 0):
-        value -= 8.0
+        value -= _Q_WITHOUT_U_PENALTY
 
     return round(value, 2)
+
+
+_TUNABLE_DEFAULTS = {
+    "blank": 25.0,
+    "s": 8.0,
+    "e": 4.0,
+    "duplicate_penalty": 2.0,
+    "all_vowel_penalty": 5.0,
+    "all_consonant_penalty": 3.0,
+    "q_without_u_penalty": 8.0,
+}
+
+
+def apply_params(params: dict) -> None:
+    """Reset the tunable leave weights to defaults, then apply overrides from ``params``.
+
+    Used by the offline tuner (tune_leaves.py). Keys: blank, s, e, duplicate_penalty,
+    all_vowel_penalty, all_consonant_penalty, q_without_u_penalty. Calling with ``{}``
+    restores the shipped defaults, so the function is idempotent between trials.
+    """
+    global _DUPLICATE_PENALTY, _ALL_VOWEL_PENALTY, _ALL_CONSONANT_PENALTY, _Q_WITHOUT_U_PENALTY
+    p = {**_TUNABLE_DEFAULTS, **(params or {})}
+    _TILE_VALUE["?"] = float(p["blank"])
+    _TILE_VALUE["S"] = float(p["s"])
+    _TILE_VALUE["E"] = float(p["e"])
+    _DUPLICATE_PENALTY = float(p["duplicate_penalty"])
+    _ALL_VOWEL_PENALTY = float(p["all_vowel_penalty"])
+    _ALL_CONSONANT_PENALTY = float(p["all_consonant_penalty"])
+    _Q_WITHOUT_U_PENALTY = float(p["q_without_u_penalty"])
