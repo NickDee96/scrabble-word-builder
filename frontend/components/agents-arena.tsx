@@ -219,55 +219,64 @@ export default function AgentsArena() {
     }
     setStats({ ...acc })
 
-    const playOneGame = async (first: "A" | "B", gameIndex: number) => {
+    // Run the batch as parallel sub-batches on the backend (/api/selfplay/games): each
+    // request plays up to `chunkSize` games across worker processes and returns them all,
+    // so the run needs ~ceil(n / chunkSize) requests instead of n sequential ones. Chunks
+    // stay small (and even, to keep the first-move A/B alternation aligned) so no single
+    // request outruns the dev-proxy window; Monte-Carlo games are slow, so they chunk smaller.
+    const seedRoot =
+      seedBase !== null && Number.isFinite(seedBase) ? Math.trunc(seedBase) * 1000 : null
+    const chunkSize = mcCount > 0 ? 4 : 8
+
+    const runChunk = async (start: number, size: number) => {
       const body: Record<string, unknown> = {
         agents: agentsRef.current,
         timeBudgetMs: gameBudget,
         maxCandidates: 8,
-        first,
+        count: size,
+        alternateFirst: true,
       }
-      if (seedBase !== null && Number.isFinite(seedBase)) {
-        body.seed = Math.trunc(seedBase) * 1000 + gameIndex
-      }
+      if (seedRoot !== null) body.seed = seedRoot + start
       for (let attempt = 0; attempt < 2 && batchRunningRef.current; attempt++) {
         try {
-          const res = await fetch("/api/selfplay/game", {
+          const res = await fetch("/api/selfplay/games", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
           })
           if (res.ok) {
-            return (await res.json()) as {
-              scores: { A: number; B: number }
-              winner: "A" | "B" | "tie"
+            const data = (await res.json()) as {
+              games: { scores: { A: number; B: number }; winner: "A" | "B" | "tie" }[]
             }
+            return data.games
           }
           if (res.status === 429) await new Promise((r) => setTimeout(r, 1500))
         } catch {
-          /* network hiccup \u2014 retry once */
+          /* network hiccup - retry once */
         }
       }
       return null
     }
 
-    for (let i = 0; i < n; i++) {
+    for (let start = 0; start < n && batchRunningRef.current; start += chunkSize) {
+      const size = Math.min(chunkSize, n - start)
+      const games = await runChunk(start, size)
       if (!batchRunningRef.current) break
-      const first = i % 2 === 0 ? "A" : "B"
-      const g = await playOneGame(first, i)
-      if (!batchRunningRef.current) break
-      if (g === null) {
-        acc.failed += 1
+      if (games === null) {
+        acc.failed += size
       } else {
-        acc.games += 1
-        acc.aTotal += g.scores.A
-        acc.bTotal += g.scores.B
-        acc.marginTotal += g.scores.A - g.scores.B
-        if (g.winner === "A") acc.aWins += 1
-        else if (g.winner === "B") acc.bWins += 1
-        else acc.ties += 1
+        for (const g of games) {
+          acc.games += 1
+          acc.aTotal += g.scores.A
+          acc.bTotal += g.scores.B
+          acc.marginTotal += g.scores.A - g.scores.B
+          if (g.winner === "A") acc.aWins += 1
+          else if (g.winner === "B") acc.bWins += 1
+          else acc.ties += 1
+        }
       }
       setStats({ ...acc })
-      setBatchDone(i + 1)
+      setBatchDone(Math.min(start + size, n))
     }
     if (acc.games === 0 && acc.failed > 0) {
       setError(
