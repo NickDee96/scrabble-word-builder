@@ -66,6 +66,7 @@ interface BatchStats {
   aTotal: number
   bTotal: number
   marginTotal: number
+  failed: number
 }
 
 const pct = (n: number, d: number) => (d ? Math.round((n / d) * 100) : 0)
@@ -81,6 +82,7 @@ export default function AgentsArena() {
   const [error, setError] = useState<string | null>(null)
   const [lastTiles, setLastTiles] = useState<Set<string>>(new Set())
   const [numGames, setNumGames] = useState(20)
+  const [batchSeed, setBatchSeed] = useState("")
   const [batchRunning, setBatchRunning] = useState(false)
   const [batchDone, setBatchDone] = useState(0)
   const [stats, setStats] = useState<BatchStats | null>(null)
@@ -196,40 +198,66 @@ export default function AgentsArena() {
     runningRef.current = false
     setRunning(false)
     const n = Math.max(1, Math.min(numGames || 1, 100))
+    // Full Monte-Carlo games are long; cap their per-move budget so each game finishes
+    // within the dev proxy's request window. Fast agents (equity/score) are unaffected.
+    const mcCount = [agentsRef.current.A, agentsRef.current.B].filter(
+      (a) => a === "simulation",
+    ).length
+    const gameBudget =
+      mcCount === 0 ? budgetRef.current : Math.min(budgetRef.current, mcCount === 2 ? 500 : 800)
+    // Optional base seed makes the whole batch reproducible (each game gets a distinct
+    // seed derived from it); blank = fresh random games every run.
+    const seedTrim = batchSeed.trim()
+    const seedBase = seedTrim === "" ? null : Number(seedTrim)
+
     batchRunningRef.current = true
     setBatchRunning(true)
     setError(null)
     setBatchDone(0)
     const acc: BatchStats = {
-      games: 0, aWins: 0, bWins: 0, ties: 0, aTotal: 0, bTotal: 0, marginTotal: 0,
+      games: 0, aWins: 0, bWins: 0, ties: 0, aTotal: 0, bTotal: 0, marginTotal: 0, failed: 0,
     }
     setStats({ ...acc })
+
+    const playOneGame = async (first: "A" | "B", gameIndex: number) => {
+      const body: Record<string, unknown> = {
+        agents: agentsRef.current,
+        timeBudgetMs: gameBudget,
+        maxCandidates: 8,
+        first,
+      }
+      if (seedBase !== null && Number.isFinite(seedBase)) {
+        body.seed = Math.trunc(seedBase) * 1000 + gameIndex
+      }
+      for (let attempt = 0; attempt < 2 && batchRunningRef.current; attempt++) {
+        try {
+          const res = await fetch("/api/selfplay/game", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          })
+          if (res.ok) {
+            return (await res.json()) as {
+              scores: { A: number; B: number }
+              winner: "A" | "B" | "tie"
+            }
+          }
+          if (res.status === 429) await new Promise((r) => setTimeout(r, 1500))
+        } catch {
+          /* network hiccup \u2014 retry once */
+        }
+      }
+      return null
+    }
+
     for (let i = 0; i < n; i++) {
       if (!batchRunningRef.current) break
       const first = i % 2 === 0 ? "A" : "B"
-      try {
-        const res = await fetch("/api/selfplay/game", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            agents: agentsRef.current,
-            timeBudgetMs: budgetRef.current,
-            maxCandidates: 8,
-            first,
-          }),
-        })
-        if (!res.ok) {
-          setError(
-            res.status === 429
-              ? "Slowing down \u2014 the server is rate-limiting games. Try again in a moment."
-              : `Game failed (status ${res.status}).`,
-          )
-          break
-        }
-        const g = (await res.json()) as {
-          scores: { A: number; B: number }
-          winner: "A" | "B" | "tie"
-        }
+      const g = await playOneGame(first, i)
+      if (!batchRunningRef.current) break
+      if (g === null) {
+        acc.failed += 1
+      } else {
         acc.games += 1
         acc.aTotal += g.scores.A
         acc.bTotal += g.scores.B
@@ -237,12 +265,14 @@ export default function AgentsArena() {
         if (g.winner === "A") acc.aWins += 1
         else if (g.winner === "B") acc.bWins += 1
         else acc.ties += 1
-        setStats({ ...acc })
-        setBatchDone(i + 1)
-      } catch {
-        setError("Could not reach the server.")
-        break
       }
+      setStats({ ...acc })
+      setBatchDone(i + 1)
+    }
+    if (acc.games === 0 && acc.failed > 0) {
+      setError(
+        "Games kept failing \u2014 Monte-Carlo games can be too slow for the dev proxy. Try a lower MC time, fewer games, or a non-MC matchup.",
+      )
     }
     batchRunningRef.current = false
     setBatchRunning(false)
@@ -499,6 +529,18 @@ export default function AgentsArena() {
                 onChange={(e) => setNumGames(Math.max(1, Math.min(Number(e.target.value) || 1, 100)))}
                 className="h-8 w-20"
               />
+              <Label htmlFor="batch-seed" className="text-xs text-muted-foreground">
+                Seed
+              </Label>
+              <Input
+                id="batch-seed"
+                type="number"
+                placeholder="random"
+                value={batchSeed}
+                disabled={batchRunning}
+                onChange={(e) => setBatchSeed(e.target.value)}
+                className="h-8 w-24"
+              />
               {batchRunning ? (
                 <Button onClick={stopBatch} className="bg-red-600 hover:bg-red-700">
                   <Pause className="w-4 h-4 mr-1" /> Stop
@@ -512,10 +554,11 @@ export default function AgentsArena() {
                   <Play className="w-4 h-4 mr-1" /> Run {numGames} games
                 </Button>
               )}
-              {(batchRunning || (stats && stats.games > 0)) && (
+              {(batchRunning || (stats && (stats.games > 0 || stats.failed > 0))) && (
                 <span className="text-xs text-muted-foreground tabular-nums">
                   {batchDone}/{numGames}
                   {batchRunning ? " …" : ""}
+                  {stats && stats.failed > 0 ? ` · ${stats.failed} failed` : ""}
                 </span>
               )}
             </div>

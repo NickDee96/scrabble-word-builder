@@ -132,3 +132,17 @@ def test_simulate_score_margin_shifts_win_probability():
     ahead = simulate(letters, blanks, "AT", score_margin=100, **common)
     # A big current lead should not lower our win estimate versus being far behind.
     assert max(r.win_pct for r in ahead) >= max(r.win_pct for r in behind)
+
+
+def test_simulate_fixed_rollouts_is_reproducible():
+    letters, blanks = _empty()
+    _place(letters, blanks, 7, 7, "STARE")
+    kw = dict(max_candidates=3, rollouts=6, workers=1, seed=42, time_budget_ms=60000)
+    first = simulate(letters, blanks, "AT", **kw)
+    second = simulate(letters, blanks, "AT", **kw)
+    assert first and len(first) <= 3
+    assert all(r.rollouts == 6 for r in first)  # exactly the requested count per candidate
+    assert [(r.move.word, round(r.win_pct, 6), round(r.equity, 6)) for r in first] == [
+        (r.move.word, round(r.win_pct, 6), round(r.equity, 6)) for r in second
+    ]
+

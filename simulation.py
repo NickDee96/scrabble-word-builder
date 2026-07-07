@@ -18,10 +18,13 @@ A compiled move generator can replace the hot inner loop later for more rollouts
 """
 from __future__ import annotations
 
+import atexit
 import math
+import os
 import random
 import time
 from collections import Counter
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from statistics import fmean
 from typing import Dict, List, Optional
@@ -168,6 +171,161 @@ def _rollout(
     return spread, tiles_left
 
 
+# --- Parallel execution (optional multiprocessing) -------------------------
+# Rollouts are independent, so they parallelize cleanly across CPU cores. A persistent
+# process pool is built once (each worker warms the dictionary trie in its initializer)
+# and reused across requests. Set SIM_WORKERS=1 to disable; any pool failure falls back
+# to the sequential path so behaviour never breaks.
+_POOL: "Optional[ProcessPoolExecutor]" = None
+
+
+def _worker_init() -> None:  # pragma: no cover - runs in a worker subprocess
+    try:
+        from board_engine import _trie
+
+        _trie()
+    except Exception:
+        pass
+
+
+def _resolve_workers(workers: Optional[int]) -> int:
+    # Each worker holds its own dictionary trie (~0.5 GB), so the default is capped for
+    # memory; SIM_WORKERS can raise it up to the hard cap below.
+    default = min(os.cpu_count() or 1, 4)
+    if workers is None:
+        env = os.getenv("SIM_WORKERS")
+        if env:
+            try:
+                workers = int(env)
+            except ValueError:
+                workers = default
+        else:
+            workers = default
+    try:
+        workers = int(workers)
+    except (TypeError, ValueError):
+        workers = 1
+    return max(1, min(workers, os.cpu_count() or 1, 8))
+
+
+def _noop_warm() -> bool:  # pragma: no cover - runs in a worker subprocess
+    from board_engine import _trie
+
+    _trie()
+    return True
+
+
+def _get_pool(n_workers: int) -> "Optional[ProcessPoolExecutor]":
+    global _POOL
+    if n_workers <= 1:
+        return None
+    if _POOL is None:
+        try:
+            _POOL = ProcessPoolExecutor(max_workers=n_workers, initializer=_worker_init)
+            # Eagerly spawn + warm every worker (each builds its trie) so the first
+            # analysis isn't charged for the ~seconds of warmup inside its time budget.
+            for fut in [_POOL.submit(_noop_warm) for _ in range(n_workers)]:
+                fut.result()
+        except Exception:
+            _POOL = None
+    return _POOL
+
+
+@atexit.register
+def _shutdown_pool() -> None:  # pragma: no cover
+    global _POOL
+    if _POOL is not None:
+        try:
+            _POOL.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
+        _POOL = None
+
+
+def _rollout_batch_worker(payload):  # pragma: no cover - runs in a worker subprocess
+    board_l, board_b, s0, residue, pool_list, score_margin, seeds = payload
+    out = []
+    for s in seeds:
+        out.append(
+            _rollout(board_l, board_b, s0, residue, pool_list, score_margin, random.Random(s))
+        )
+    return out
+
+
+def _collect(candidates, spreads, winps) -> List[SimResult]:
+    results: List[SimResult] = []
+    for c in candidates:
+        sp = spreads[id(c)]
+        if not sp:
+            continue
+        n = len(sp)
+        std_err = _std(sp) / math.sqrt(n) if n > 1 else 0.0
+        results.append(
+            SimResult(
+                move=c, rollouts=n, equity=fmean(sp), win_pct=fmean(winps[id(c)]), std_err=std_err
+            )
+        )
+    results.sort(key=lambda r: (-r.win_pct, -r.equity))
+    return results
+
+
+def _simulate_parallel(
+    candidates,
+    boards,
+    pool_list,
+    *,
+    time_budget_ms,
+    max_rollouts,
+    batch,
+    score_margin,
+    seed,
+    rollouts,
+    n_workers,
+) -> "Optional[List[SimResult]]":
+    """Run rollouts across the process pool. Returns ``None`` if the pool is unavailable.
+
+    ``rollouts`` set -> fixed count per candidate (reproducible with a seed, no racing);
+    otherwise deadline-bounded rounds with UCB-style pruning between rounds.
+    """
+    pool = _get_pool(n_workers)
+    if pool is None:
+        return None
+    spreads: Dict[int, List[float]] = {id(c): [] for c in candidates}
+    winps: Dict[int, List[float]] = {id(c): [] for c in candidates}
+    master = random.Random(seed if seed is not None else random.randrange(1 << 30))
+    deterministic = rollouts is not None
+    target = rollouts if deterministic else max_rollouts
+    deadline = time.monotonic() + time_budget_ms / 1000.0
+    active = list(candidates)
+    try:
+        while active:
+            if not deterministic and time.monotonic() >= deadline:
+                break
+            if all(len(spreads[id(c)]) >= target for c in active):
+                break
+            futures = []
+            for c in active:
+                have = len(spreads[id(c)])
+                if have >= target:
+                    continue
+                k = min(batch, target - have)
+                board_l, board_b = boards[id(c)]
+                seeds = [master.randrange(1 << 31) for _ in range(k)]
+                payload = (board_l, board_b, c.score, c.leave, pool_list, score_margin, seeds)
+                futures.append((c, pool.submit(_rollout_batch_worker, payload)))
+            for c, fut in futures:
+                for spread, tiles_left in fut.result():
+                    spreads[id(c)].append(spread)
+                    winps[id(c)].append(win_probability(spread, tiles_left))
+            if deterministic:
+                active = [c for c in active if len(spreads[id(c)]) < target]
+            else:
+                active = _prune(active, spreads)
+    except Exception:
+        return None
+    return _collect(candidates, spreads, winps)
+
+
 def simulate(
     letters: Grid,
     blanks: BoolGrid,
@@ -180,6 +338,8 @@ def simulate(
     batch: int = 3,
     score_margin: float = 0.0,
     seed: Optional[int] = None,
+    workers: Optional[int] = None,
+    rollouts: Optional[int] = None,
 ) -> List[SimResult]:
     """Rank plays by simulated win probability.
 
@@ -193,8 +353,6 @@ def simulate(
     moves = generate_moves(letters, blanks, rack)
     if not moves:
         return []
-
-    # Candidate set: best placement of each distinct word, top N by static equity.
     by_word: Dict[str, Move] = {}
     for m in sorted(moves, key=lambda m: (-m.equity, -m.score, m.word)):
         by_word.setdefault(m.word, m)
@@ -204,11 +362,27 @@ def simulate(
 
     # Pre-apply each candidate once (the board it leaves is fixed across its rollouts).
     boards = {id(c): _apply_move(letters, blanks, c) for c in candidates}
+
+    # Prefer the process pool (all cores) when enabled; fall back to sequential on failure.
+    n_workers = _resolve_workers(workers)
+    if n_workers > 1:
+        parallel = _simulate_parallel(
+            candidates,
+            boards,
+            pool_list,
+            time_budget_ms=time_budget_ms,
+            max_rollouts=max_rollouts,
+            batch=batch,
+            score_margin=score_margin,
+            seed=seed,
+            rollouts=rollouts,
+            n_workers=n_workers,
+        )
+        if parallel is not None:
+            return parallel
+
     spreads: Dict[int, List[float]] = {id(c): [] for c in candidates}
     winps: Dict[int, List[float]] = {id(c): [] for c in candidates}
-
-    deadline = time.monotonic() + time_budget_ms / 1000.0
-    active = list(candidates)
 
     def run_batch(c: Move, n: int) -> None:
         board_l, board_b = boards[id(c)]
@@ -219,12 +393,17 @@ def simulate(
             spreads[id(c)].append(spread)
             winps[id(c)].append(win_probability(spread, tiles_left))
 
-    # Seed every candidate with a minimum number of rollouts.
-    for c in active:
+    if rollouts:  # fixed count -> reproducible with a seed (no racing/early stop)
+        for c in candidates:
+            run_batch(c, rollouts)
+        return _collect(candidates, spreads, winps)
+
+    deadline = time.monotonic() + time_budget_ms / 1000.0
+    active = list(candidates)
+    for c in active:  # seed every candidate with a minimum number of rollouts
         run_batch(c, min_rollouts)
         if time.monotonic() >= deadline:
             break
-
     # Race the survivors: spend the rest of the budget on candidates that could still win.
     while time.monotonic() < deadline and len(active) > 1:
         if all(len(spreads[id(c)]) >= max_rollouts for c in active):
@@ -235,26 +414,7 @@ def simulate(
             if time.monotonic() >= deadline:
                 break
         active = _prune(active, spreads)
-
-    results: List[SimResult] = []
-    for c in candidates:
-        sp = spreads[id(c)]
-        if not sp:
-            continue
-        n = len(sp)
-        mean_spread = fmean(sp)
-        std_err = _std(sp) / math.sqrt(n) if n > 1 else 0.0
-        results.append(
-            SimResult(
-                move=c,
-                rollouts=n,
-                equity=mean_spread,
-                win_pct=fmean(winps[id(c)]),
-                std_err=std_err,
-            )
-        )
-    results.sort(key=lambda r: (-r.win_pct, -r.equity))
-    return results
+    return _collect(candidates, spreads, winps)
 
 
 def _std(values: List[float]) -> float:

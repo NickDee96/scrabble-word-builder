@@ -67,6 +67,7 @@ export default function AnalyzeBoard({
   const [copied, setCopied] = useState(false)
   const [mode, setMode] = useState<"equity" | "score" | "simulation">("equity")
   const [scoreMargin, setScoreMargin] = useState(0)
+  const [reproducible, setReproducible] = useState(false)
   const [undoStack, setUndoStack] = useState<Snapshot[]>([])
   const [redoStack, setRedoStack] = useState<Snapshot[]>([])
   const [reviewOpen, setReviewOpen] = useState(false)
@@ -159,6 +160,11 @@ export default function AnalyzeBoard({
         payload.timeBudgetMs = 6000
         payload.maxCandidates = 8
         payload.scoreMargin = scoreMargin
+        if (reproducible) {
+          // Fixed seed + fixed rollout count => identical results every run.
+          payload.seed = 1234
+          payload.rollouts = 8
+        }
       }
       const response = await fetch("/api/analyze", {
         method: "POST",
@@ -568,6 +574,17 @@ export default function AnalyzeBoard({
                 />
                 <span className="text-muted-foreground">points now, for win %</span>
               </div>
+            )}
+            {mode === "simulation" && (
+              <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={reproducible}
+                  onChange={(e) => setReproducible(e.target.checked)}
+                  className="h-3.5 w-3.5 accent-blue-600"
+                />
+                Reproducible — fixed seed, same result each run (a bit slower)
+              </label>
             )}
             <Button
               onClick={() => analyze()}

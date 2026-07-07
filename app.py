@@ -111,6 +111,8 @@ class AnalyzeRequest(BaseModel):
     timeBudgetMs: int = 4000
     maxCandidates: int = 8
     scoreMargin: float = 0.0
+    seed: Optional[int] = None
+    rollouts: Optional[int] = None
 
 
 class PlacedTileOut(BaseModel):
@@ -195,7 +197,7 @@ def _validate_rack(letters: str, board_letters: str) -> None:
 
 @app.post("/api/find-words", response_model=FindWordsResponse)
 @limiter.limit(_find_words_rate_limit)
-async def api_find_words(request: Request, request_data: FindWordsRequest):
+def api_find_words(request: Request, request_data: FindWordsRequest):
     """Find every valid word playable from the supplied letters."""
     letters = request_data.letters.strip()
     board_letters = request_data.boardLetters.strip() if request_data.boardLetters else ""
@@ -221,9 +223,13 @@ async def api_find_words(request: Request, request_data: FindWordsRequest):
     )
 
 
+# NOTE: the move-generation / simulation endpoints below are deliberately *sync* ``def``
+# (not ``async def``). They are CPU-bound, so Starlette runs them in a worker thread and the
+# event loop stays free to service other connections. As ``async def`` they would block the
+# loop for the whole (long) request, freezing the server and causing proxy ECONNRESETs.
 @app.post("/api/analyze", response_model=AnalyzeResponse)
 @limiter.limit(_analyze_rate_limit)
-async def api_analyze(request: Request, data: AnalyzeRequest):
+def api_analyze(request: Request, data: AnalyzeRequest):
     """Analyze a full board position and return the best legal plays for a rack."""
     if len(data.board) != BOARD_SIZE or any(len(row) != BOARD_SIZE for row in data.board):
         raise HTTPException(status_code=422, detail=f"Board must be {BOARD_SIZE}x{BOARD_SIZE}")
@@ -258,6 +264,7 @@ async def api_analyze(request: Request, data: AnalyzeRequest):
         time_budget = max(500, min(int(data.timeBudgetMs), MAX_SIM_TIME_MS))
         max_cand = max(1, min(int(data.maxCandidates), MAX_SIM_CANDIDATES))
         margin = max(-500.0, min(float(data.scoreMargin), 500.0))
+        det_rollouts = max(1, min(int(data.rollouts), 40)) if data.rollouts else None
         sim = simulate(
             letters,
             blanks,
@@ -265,6 +272,8 @@ async def api_analyze(request: Request, data: AnalyzeRequest):
             max_candidates=max_cand,
             time_budget_ms=time_budget,
             score_margin=margin,
+            seed=data.seed,
+            rollouts=det_rollouts,
         )
         plays = [
             PlayOut(
@@ -338,7 +347,7 @@ async def api_selfplay_new(request: Request, data: NewGameRequest):
 
 @app.post("/api/selfplay/step")
 @limiter.limit(_selfplay_rate_limit)
-async def api_selfplay_step(request: Request, data: StepRequest):
+def api_selfplay_step(request: Request, data: StepRequest):
     """Play one turn of a self-play game for the side to move and return the new state."""
     state = data.state
     for key in ("board", "racks", "bag", "scores", "turn"):
@@ -374,7 +383,7 @@ async def api_selfplay_step(request: Request, data: StepRequest):
 
 @app.post("/api/selfplay/game")
 @limiter.limit(_selfplay_rate_limit)
-async def api_selfplay_game(request: Request, data: GameRequest):
+def api_selfplay_game(request: Request, data: GameRequest):
     """Play one full self-play game between the two agents and return the result summary."""
     for who in ("A", "B"):
         if getattr(data.agents, who) not in ("equity", "score", "simulation"):
@@ -411,7 +420,7 @@ async def scrabble_word_builder_web(request: Request):
 
 
 @app.post("/", response_class=HTMLResponse)
-async def scrabble_word_builder_web_post(
+def scrabble_word_builder_web_post(
     request: Request,
     letters: str = Form(...),
     board_letters: str = Form(default=""),
