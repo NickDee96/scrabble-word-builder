@@ -276,6 +276,7 @@ def _simulate_parallel(
     *,
     time_budget_ms,
     max_rollouts,
+    min_rollouts,
     batch,
     score_margin,
     seed,
@@ -284,8 +285,8 @@ def _simulate_parallel(
 ) -> "Optional[List[SimResult]]":
     """Run rollouts across the process pool. Returns ``None`` if the pool is unavailable.
 
-    ``rollouts`` set -> fixed count per candidate (reproducible with a seed, no racing);
-    otherwise deadline-bounded rounds with UCB-style pruning between rounds.
+    ``rollouts`` set -> fixed count per candidate (reproducible with a seed); otherwise a
+    time-budgeted top-two Thompson allocation across the candidates.
     """
     pool = _get_pool(n_workers)
     if pool is None:
@@ -293,34 +294,40 @@ def _simulate_parallel(
     spreads: Dict[int, List[float]] = {id(c): [] for c in candidates}
     winps: Dict[int, List[float]] = {id(c): [] for c in candidates}
     master = random.Random(seed if seed is not None else random.randrange(1 << 30))
-    deterministic = rollouts is not None
-    target = rollouts if deterministic else max_rollouts
     deadline = time.monotonic() + time_budget_ms / 1000.0
-    active = list(candidates)
+
+    def run(alloc) -> None:
+        futures = []
+        for c, k in alloc:
+            if k <= 0:
+                continue
+            board_l, board_b = boards[id(c)]
+            seeds = [master.randrange(1 << 31) for _ in range(k)]
+            payload = (board_l, board_b, c.score, c.leave, pool_list, score_margin, seeds)
+            futures.append((c, pool.submit(_rollout_batch_worker, payload)))
+        for c, fut in futures:
+            for spread, tiles_left in fut.result():
+                spreads[id(c)].append(spread)
+                winps[id(c)].append(win_probability(spread, tiles_left))
+
     try:
-        while active:
-            if not deterministic and time.monotonic() >= deadline:
+        if rollouts is not None:  # reproducible fixed count -> equal allocation
+            while any(len(spreads[id(c)]) < rollouts for c in candidates):
+                run([(c, min(batch, rollouts - len(spreads[id(c)]))) for c in candidates])
+            return _collect(candidates, spreads, winps)
+
+        run([(c, min_rollouts) for c in candidates])  # seed every arm's posterior
+        while time.monotonic() < deadline:
+            active = [c for c in candidates if len(spreads[id(c)]) < max_rollouts]
+            if not active:
                 break
-            if all(len(spreads[id(c)]) >= target for c in active):
+            counts = _bandit_counts(active, winps, batch * n_workers, master)
+            alloc = [
+                (c, min(counts.get(id(c), 0), max_rollouts - len(spreads[id(c)]))) for c in active
+            ]
+            if not any(k > 0 for _, k in alloc):
                 break
-            futures = []
-            for c in active:
-                have = len(spreads[id(c)])
-                if have >= target:
-                    continue
-                k = min(batch, target - have)
-                board_l, board_b = boards[id(c)]
-                seeds = [master.randrange(1 << 31) for _ in range(k)]
-                payload = (board_l, board_b, c.score, c.leave, pool_list, score_margin, seeds)
-                futures.append((c, pool.submit(_rollout_batch_worker, payload)))
-            for c, fut in futures:
-                for spread, tiles_left in fut.result():
-                    spreads[id(c)].append(spread)
-                    winps[id(c)].append(win_probability(spread, tiles_left))
-            if deterministic:
-                active = [c for c in active if len(spreads[id(c)]) < target]
-            else:
-                active = _prune(active, spreads)
+            run(alloc)
     except Exception:
         return None
     return _collect(candidates, spreads, winps)
@@ -377,6 +384,7 @@ def simulate(
             seed=seed,
             rollouts=rollouts,
             n_workers=n_workers,
+            min_rollouts=min_rollouts,
         )
         if parallel is not None:
             return parallel
@@ -399,21 +407,26 @@ def simulate(
         return _collect(candidates, spreads, winps)
 
     deadline = time.monotonic() + time_budget_ms / 1000.0
-    active = list(candidates)
-    for c in active:  # seed every candidate with a minimum number of rollouts
+    for c in candidates:  # seed every candidate so its posterior is initialised
         run_batch(c, min_rollouts)
         if time.monotonic() >= deadline:
             break
-    # Race the survivors: spend the rest of the budget on candidates that could still win.
-    while time.monotonic() < deadline and len(active) > 1:
-        if all(len(spreads[id(c)]) >= max_rollouts for c in active):
+    # Top-two Thompson sampling: spend the remaining budget on the leader and its challenger.
+    while time.monotonic() < deadline:
+        active = [c for c in candidates if len(spreads[id(c)]) < max_rollouts]
+        if not active:
             break
+        counts = _bandit_counts(active, winps, batch, rng)
+        spent = False
         for c in active:
-            if len(spreads[id(c)]) < max_rollouts:
-                run_batch(c, batch)
+            k = min(counts.get(id(c), 0), max_rollouts - len(spreads[id(c)]))
+            if k > 0:
+                run_batch(c, k)
+                spent = True
             if time.monotonic() >= deadline:
                 break
-        active = _prune(active, spreads)
+        if not spent:
+            break
     return _collect(candidates, spreads, winps)
 
 
@@ -425,18 +438,45 @@ def _std(values: List[float]) -> float:
     return math.sqrt(sum((v - mean) ** 2 for v in values) / (n - 1))
 
 
-def _prune(active: List[Move], spreads: Dict[int, List[float]]) -> List[Move]:
-    """Drop candidates whose spread upper bound is below the leader's lower bound (95%)."""
-    stats = []
-    for c in active:
-        sp = spreads[id(c)]
-        n = len(sp)
-        mean = fmean(sp)
-        se = _std(sp) / math.sqrt(n) if n > 1 else float("inf")
-        stats.append((c, mean, se))
-    leader = max(stats, key=lambda s: s[1])
-    lead_lb = leader[1] - 2.0 * leader[2]
-    survivors = [c for (c, mean, se) in stats if mean + 2.0 * se >= lead_lb]
-    if leader[0] not in survivors:
-        survivors.append(leader[0])
-    return survivors
+# --- Top-two Thompson sampling allocation (best-arm identification) ---------
+# Rollouts are scarce, so instead of spreading them evenly we model each candidate's win%
+# as a Normal posterior over its mean and, each round, sample a "leader" plus (half the
+# time) its closest "challenger", spending the next rollouts on those two. This is Russo's
+# top-two Thompson sampling for best-arm identification: far more discriminating power per
+# rollout than uniform sampling or confidence-bound racing.
+_TTTS_BETA = 0.5            # P(sample the leader) vs its challenger each draw
+_BANDIT_PRIOR_SIGMA = 0.35  # posterior std for an arm with a single sample (win% in [0, 1])
+_BANDIT_MIN_SIGMA = 0.01    # floor so a confident arm can still be revisited
+
+
+def _posterior_stats(samples: List[float]):
+    """Mean and posterior std of an arm's mean win% (wide when barely sampled)."""
+    n = len(samples)
+    if n == 0:
+        return 0.0, _BANDIT_PRIOR_SIGMA * 4
+    mean = fmean(samples)
+    if n < 2:
+        return mean, _BANDIT_PRIOR_SIGMA
+    return mean, max(_std(samples) / math.sqrt(n), _BANDIT_MIN_SIGMA)
+
+
+def _ttts_pick(stats, rng: random.Random) -> int:
+    """Index of the next arm to sample, via top-two Thompson sampling."""
+    draws = [rng.gauss(mean, sigma) for mean, sigma in stats]
+    leader = max(range(len(stats)), key=lambda i: draws[i])
+    if len(stats) == 1 or rng.random() < _TTTS_BETA:
+        return leader
+    # Challenger: the best arm other than the leader in a fresh posterior sample.
+    cdraws = [rng.gauss(mean, sigma) for mean, sigma in stats]
+    cdraws[leader] = float("-inf")
+    return max(range(len(stats)), key=lambda i: cdraws[i])
+
+
+def _bandit_counts(active, winps, slots: int, rng: random.Random) -> Dict[int, int]:
+    """Split ``slots`` upcoming rollouts across ``active`` arms by top-two Thompson."""
+    stats = [_posterior_stats(winps[id(c)]) for c in active]
+    counts: Dict[int, int] = {}
+    for _ in range(max(1, slots)):
+        cid = id(active[_ttts_pick(stats, rng)])
+        counts[cid] = counts.get(cid, 0) + 1
+    return counts

@@ -146,3 +146,18 @@ def test_simulate_fixed_rollouts_is_reproducible():
         (r.move.word, round(r.win_pct, 6), round(r.equity, 6)) for r in second
     ]
 
+
+def test_bandit_counts_concentrates_on_top_two():
+    import random as _random
+
+    from simulation import _bandit_counts
+
+    a, b, c = object(), object(), object()
+    winps = {id(a): [0.9] * 8, id(b): [0.6] * 8, id(c): [0.2] * 8}
+    counts = _bandit_counts([a, b, c], winps, slots=300, rng=_random.Random(0))
+    # Top-two Thompson spends almost everything on the two strongest arms and starves the
+    # clear loser — the point of best-arm allocation.
+    assert counts.get(id(a), 0) > counts.get(id(c), 0)
+    assert counts.get(id(b), 0) > counts.get(id(c), 0)
+    assert counts.get(id(a), 0) + counts.get(id(b), 0) >= 0.8 * 300
+
