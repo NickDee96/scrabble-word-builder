@@ -13,7 +13,7 @@ from typing import Optional
 from scrabble_engine import scrabble_word_builder, word_count
 from board_engine import generate_moves, BOARD_SIZE
 from simulation import simulate
-from selfplay import new_game, play_turn, play_game, RACK_SIZE
+from selfplay import new_game, play_turn, play_game, play_games, RACK_SIZE
 
 # --- Configuration (environment-driven) ------------------------------------
 _DEFAULT_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000"
@@ -31,6 +31,7 @@ MAX_BOARD_LETTERS = int(os.getenv("MAX_BOARD_LETTERS", "15"))
 # Simulation is far heavier than static ranking, so its cost is bounded here.
 MAX_SIM_TIME_MS = int(os.getenv("MAX_SIM_TIME_MS", "12000"))
 MAX_SIM_CANDIDATES = int(os.getenv("MAX_SIM_CANDIDATES", "12"))
+MAX_BATCH_GAMES = int(os.getenv("MAX_BATCH_GAMES", "20"))
 BLANK_CHARS = {" ", "?"}
 
 
@@ -168,6 +169,15 @@ class GameRequest(BaseModel):
     maxCandidates: int = 8
     first: str = "A"
     seed: Optional[int] = None
+
+
+class BatchGameRequest(BaseModel):
+    agents: SelfPlayAgents = SelfPlayAgents()
+    timeBudgetMs: int = 2000
+    maxCandidates: int = 8
+    count: int = 10
+    seed: Optional[int] = None
+    alternateFirst: bool = True
 
 
 def _validate_rack(letters: str, board_letters: str) -> None:
@@ -401,6 +411,58 @@ def api_selfplay_game(request: Request, data: GameRequest):
         first=first,
         seed=data.seed,
     )
+
+
+@app.post("/api/selfplay/games")
+@limiter.limit(_selfplay_rate_limit)
+def api_selfplay_games(request: Request, data: BatchGameRequest):
+    """Play a batch of self-play games in parallel and return per-game results + an H2H summary.
+
+    The games run across a process pool (see ``selfplay.play_games``), so a head-to-head of
+    ``count`` games finishes in roughly ``ceil(count / workers)`` game-times instead of
+    ``count`` of them. Seeds are derived from ``seed`` (when given) so the batch is
+    reproducible; ``alternateFirst`` swaps the opener each game to balance first-move edge.
+    """
+    for who in ("A", "B"):
+        if getattr(data.agents, who) not in ("equity", "score", "simulation"):
+            raise HTTPException(
+                status_code=422, detail="agents must be 'equity', 'score', or 'simulation'"
+            )
+    count = max(1, min(int(data.count), MAX_BATCH_GAMES))
+    time_budget = max(300, min(int(data.timeBudgetMs), MAX_SIM_TIME_MS))
+    max_cand = max(1, min(int(data.maxCandidates), MAX_SIM_CANDIDATES))
+    base = int(data.seed) if data.seed is not None else None
+    specs = [
+        {
+            "agent_a": data.agents.A,
+            "agent_b": data.agents.B,
+            "time_budget_ms": time_budget,
+            "max_candidates": max_cand,
+            "first": ("A" if i % 2 == 0 else "B") if data.alternateFirst else "A",
+            "seed": (base + i) if base is not None else None,
+        }
+        for i in range(count)
+    ]
+    results = play_games(specs)
+    wins_a = sum(1 for r in results if r["winner"] == "A")
+    wins_b = sum(1 for r in results if r["winner"] == "B")
+    ties = sum(1 for r in results if r["winner"] == "tie")
+    avg_a = sum(r["scores"]["A"] for r in results) / len(results)
+    avg_b = sum(r["scores"]["B"] for r in results) / len(results)
+    return {
+        "games": results,
+        "summary": {
+            "count": len(results),
+            "agentA": data.agents.A,
+            "agentB": data.agents.B,
+            "winsA": wins_a,
+            "winsB": wins_b,
+            "ties": ties,
+            "avgScoreA": round(avg_a, 1),
+            "avgScoreB": round(avg_b, 1),
+            "avgMargin": round(avg_a - avg_b, 1),
+        },
+    }
 
 
 @app.get("/api/health", response_model=HealthResponse)

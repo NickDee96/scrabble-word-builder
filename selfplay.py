@@ -15,14 +15,18 @@ The board is exchanged as 15 lines of text (uppercase = tile, lowercase = blank 
 """
 from __future__ import annotations
 
+import atexit
 import copy
+import os
 import random
 from collections import Counter
+from concurrent.futures import ProcessPoolExecutor
 from typing import Dict, List, Optional, Tuple
 
+import leaves
 from board_engine import BLANK, BOARD_SIZE, TILE_DISTRIBUTION, Move, generate_moves
 from scrabble_engine import SCORES
-from simulation import simulate
+from simulation import simulate, _resolve_workers, _noop_warm
 
 RACK_SIZE = 7
 _PASS_LIMIT = 6  # game ends after this many consecutive scoreless turns (2 players x 3)
@@ -254,4 +258,95 @@ def play_game(
         "first": first,
         "bagLeft": len(state["bag"]),
     }
+
+
+# --- Parallel batch execution ----------------------------------------------
+# A batch of games is embarrassingly parallel, so it fans out cleanly across CPU cores.
+# This runner is shared by the offline leave tuner (tune_leaves.py) and the
+# /api/selfplay/games endpoint. A persistent, pre-warmed process pool (each worker builds
+# the dictionary trie once in its initializer) is reused across batches. Worker count is
+# resolved by simulation._resolve_workers, so SIM_WORKERS tunes it and =1 stays sequential.
+_GAME_POOL: "Optional[ProcessPoolExecutor]" = None
+
+
+def _game_worker_init() -> None:  # pragma: no cover - runs in a worker subprocess
+    # Games run in parallel across this pool already, so a "simulation" agent inside a
+    # pooled game must NOT spawn its own rollout pool (no nested pools / oversubscription).
+    os.environ["SIM_WORKERS"] = "1"
+    try:
+        from board_engine import _trie
+
+        _trie()
+    except Exception:
+        pass
+
+
+def _get_game_pool(n_workers: int) -> "Optional[ProcessPoolExecutor]":
+    global _GAME_POOL
+    if n_workers <= 1:
+        return None
+    if _GAME_POOL is None:
+        try:
+            _GAME_POOL = ProcessPoolExecutor(
+                max_workers=n_workers, initializer=_game_worker_init
+            )
+            # Eagerly spawn + warm every worker so the first batch isn't charged for it.
+            for fut in [_GAME_POOL.submit(_noop_warm) for _ in range(n_workers)]:
+                fut.result()
+        except Exception:
+            _GAME_POOL = None
+    return _GAME_POOL
+
+
+@atexit.register
+def _shutdown_game_pool() -> None:  # pragma: no cover
+    global _GAME_POOL
+    if _GAME_POOL is not None:
+        try:
+            _GAME_POOL.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
+
+
+def _play_one(spec: dict) -> dict:
+    """Run a single game from a picklable spec (top-level so it pickles to workers).
+
+    ``leave_params`` (when present) is applied to the leave weights *inside the worker*
+    before the game, so the offline tuner can evaluate different weights in parallel.
+    """
+    leave_params = spec.get("leave_params")
+    if leave_params is not None:
+        leaves.apply_params(leave_params)
+    return play_game(
+        spec["agent_a"],
+        spec["agent_b"],
+        time_budget_ms=spec.get("time_budget_ms", 2000),
+        max_candidates=spec.get("max_candidates", 8),
+        seed=spec.get("seed"),
+        first=spec.get("first", "A"),
+        max_turns=spec.get("max_turns", 80),
+    )
+
+
+def play_games(specs: List[dict], *, workers: Optional[int] = None) -> List[dict]:
+    """Play a batch of games, in parallel across processes when possible.
+
+    Each spec is a dict with keys ``agent_a`` and ``agent_b`` plus optional
+    ``time_budget_ms``, ``max_candidates``, ``seed``, ``first``, ``max_turns`` and
+    ``leave_params``. Results come back in the same order as ``specs``, so fixed per-spec
+    seeds make the whole batch reproducible regardless of the worker count. Any pool
+    failure falls back to the sequential path, so behaviour never breaks.
+    """
+    if not specs:
+        return []
+    n = _resolve_workers(workers)
+    if n <= 1 or len(specs) == 1:
+        return [_play_one(s) for s in specs]
+    pool = _get_game_pool(n)
+    if pool is None:
+        return [_play_one(s) for s in specs]
+    try:
+        return list(pool.map(_play_one, specs))
+    except Exception:
+        return [_play_one(s) for s in specs]
 

@@ -28,7 +28,7 @@ import random
 from typing import Dict, Optional, Tuple
 
 import leaves
-from selfplay import play_game
+from selfplay import play_games
 
 # Parameter search space: name -> (low, high). Current shipped defaults in the comments.
 PARAM_SPACE: Dict[str, Tuple[float, float]] = {
@@ -45,13 +45,25 @@ _BASE_SEED = 1000
 
 
 def evaluate(params: Dict[str, float], games: int = 24) -> float:
-    """Mean (equity - score) point margin over ``games`` seeded self-play games."""
-    leaves.apply_params(params)  # {} restores defaults, so this is idempotent per call
-    total = 0
-    for i in range(games):
-        first = "A" if i % 2 == 0 else "B"  # alternate the opener for fairness
-        result = play_game("equity", "score", first=first, seed=_BASE_SEED + i)
-        total += result["scores"]["A"] - result["scores"]["B"]  # A = equity, B = score
+    """Mean (equity - score) point margin over ``games`` seeded self-play games.
+
+    Games run in parallel across CPU cores (see ``selfplay.play_games``); each worker
+    applies ``params`` to the leave weights before playing, so the whole batch uses the
+    trial's weights. Fixed seeds (common random numbers) keep the objective low-noise and
+    identical to the sequential result.
+    """
+    specs = [
+        {
+            "agent_a": "equity",
+            "agent_b": "score",
+            "first": "A" if i % 2 == 0 else "B",  # alternate the opener for fairness
+            "seed": _BASE_SEED + i,
+            "leave_params": params,  # {} restores defaults, applied inside each worker
+        }
+        for i in range(games)
+    ]
+    results = play_games(specs)
+    total = sum(r["scores"]["A"] - r["scores"]["B"] for r in results)  # A=equity, B=score
     return total / games
 
 
